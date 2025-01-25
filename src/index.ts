@@ -48,10 +48,6 @@ export function apply(ctx: Context, config: Config) {
   const prizeFilePath = path.join(root, 'prizes.json')
   const userEntriesFilePath = path.join(root, 'user_entries.json')
 
-  // -------------------------------
-  // 以下方法大体与之前一致，仅替换了文件路径
-  // -------------------------------
-
   // 初始化奖池文件和用户抽奖文件
   const initializeFile = async (filePath: string, defaultContent: object) => {
     try {
@@ -207,9 +203,12 @@ export function apply(ctx: Context, config: Config) {
 
       await sendMessage(
         session,
-        `🎉 恭喜 ${session.username} (QQ号: ${userId}) 抽取到奖品: "${prize.name}" - ${prize.description}（奖池 "${pool}" 剩余 ${prizes.length} 个）`
-      )
-    })
+        `🎉 恭喜 ${session.username} (QQ号: ${userId})\n` +
+        `抽取到奖品: "${prize.name}"\n` +
+        `- ${prize.description}\n` +
+        `（奖池 "${pool}" 剩余 ${prizes.length} 个）`
+      );
+      
 
   // `draw.add <data:text>` 命令：添加奖品
   ctx.command('draw.add <data:text>', '管理员向指定奖池添加奖品 (支持批量)')
