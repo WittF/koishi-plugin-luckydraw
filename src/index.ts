@@ -203,7 +203,7 @@ export function apply(ctx: Context, config: Config) {
 
       await sendMessage(
         session,
-        `🎉 恭喜 ${session.username} (QQ号: ${userId}) 抽取到奖品"${prize.name}": \n ${prize.description} \n （奖池 "${pool}" 剩余 ${prizes.length} 个）`
+        `🎉 恭喜 ${session.username} 抽取到奖品"${prize.name}": \n ${prize.description} \n （奖池 "${pool}" 剩余 ${prizes.length} 个）`
       )
     })
 
