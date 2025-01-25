@@ -97,24 +97,20 @@ const checkAdmin = (userId: string, adminQQ: string): boolean => userId === admi
 // 封装发送消息的函数 
 const sendMessage = async (session: Session, content: string | any[]) => { 
   try { 
+    // 确保 content 是字符串或 Element
+    const formattedContent = Array.isArray(content) ? content.join(' ') : content;
+    
+    // 处理私聊和群聊的消息格式
     const promptMessage = session.channelId.startsWith('private:')
-      ? [
-          h.quote(session.messageId),
-          content
-        ]
-      : [
-          h.quote(session.messageId),
-          h.at(session.userId),
-          '\n',
-          content
-        ];
- 
-    await session.send(promptMessage); 
+      ? [h.quote(session.messageId), formattedContent]
+      : [h.quote(session.messageId), h.at(session.userId), '\n', formattedContent];
+
+    await session.send(promptMessage.flat()); 
   } catch (error) { 
-    // 处理发送消息失败的情况 
     console.error('发送消息失败:', error);
   } 
-}; 
+};
+
  
 export function apply(ctx: Context, config: Config) { 
   const logger = new Logger('lucky-draw'); 

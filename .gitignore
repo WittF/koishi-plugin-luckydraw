@@ -1,27 +1,23 @@
-# 忽略常见的构建和依赖目录
 lib/
 dist/
 external/
 node_modules/
 
-# 忽略日志和临时文件
 npm-debug.log
 yarn-debug.log
 yarn-error.log
 tsconfig.tsbuildinfo
 
-# 忽略编辑器和 IDE 相关文件
 .eslintcache
 .DS_Store
 .idea/
 .vscode/
 
-# 忽略 VS 相关文件
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 
-# 例外：强制追踪 src/prizes.json 和 src/user_entries.json
-!src/prizes.json
-!src/user_entries.json
+src/prizes.json
+src/user_entries.json
+
