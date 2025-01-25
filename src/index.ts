@@ -203,12 +203,9 @@ export function apply(ctx: Context, config: Config) {
 
       await sendMessage(
         session,
-        `🎉 恭喜 ${session.username} (QQ号: ${userId})\n` +
-        `抽取到奖品: "${prize.name}"\n` +
-        `- ${prize.description}\n` +
-        `（奖池 "${pool}" 剩余 ${prizes.length} 个）`
-      );
-      
+        `🎉 恭喜 ${session.username} (QQ号: ${userId}) 抽取到奖品"${prize.name}": \n ${prize.description} \n （奖池 "${pool}" 剩余 ${prizes.length} 个）`
+      )
+    })
 
   // `draw.add <data:text>` 命令：添加奖品
   ctx.command('draw.add <data:text>', '管理员向指定奖池添加奖品 (支持批量)')
