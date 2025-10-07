@@ -96,7 +96,15 @@ export class RaffleTimerManager {
             message += `💨 本次抽奖无人中奖，谢谢参与！`
           }
 
-          await this.ctx.broadcast([`${activity.guildId}`], message)
+          // 使用 bot.sendMessage 发送消息到群聊
+          for (const bot of this.ctx.bots) {
+            try {
+              await bot.sendMessage(activity.guildId, message)
+              break // 发送成功后跳出循环
+            } catch (err) {
+              this.logger.warn(`Bot ${bot.sid} 发送开奖通知失败: ${err}`)
+            }
+          }
         } catch (error) {
           this.logger.error(`发送开奖通知失败: ${error}`)
         }
