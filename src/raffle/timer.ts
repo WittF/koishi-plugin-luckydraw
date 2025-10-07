@@ -1,4 +1,4 @@
-import { Context, Logger } from 'koishi'
+import { Context, Logger, h } from 'koishi'
 import { RaffleActivity } from '../types'
 import { RaffleHandler } from './handler'
 import { formatTime } from '../utils'
@@ -80,26 +80,30 @@ export class RaffleTimerManager {
       // 发送开奖通知
       if (activity.guildId) {
         try {
-          // 只显示真正中奖的用户（排除None - none）
-          const realWinners = winners.filter(w => w.prize !== 'None - none')
+          // 只显示真正中奖的用户（排除None - none，不区分大小写）
+          const realWinners = winners.filter(w => w.prize.toLowerCase() !== 'none - none')
 
-          let message = `🎊 抽奖活动 "${activity.name}" 已开奖！\n\n`
-          message += `📊 参与人数: ${activity.participants.length}\n`
+          // 构建消息元素
+          const messageElements: any[] = []
+          messageElements.push(`🎊 抽奖活动 "${activity.name}" 已开奖！\n\n`)
+          messageElements.push(`📊 参与人数: ${activity.participants.length}\n`)
 
           if (realWinners.length > 0) {
-            message += `🎁 中奖名单:\n\n`
+            messageElements.push(`🎁 中奖名单:\n\n`)
             realWinners.forEach((winner, index) => {
-              message += `${index + 1}. ${winner.username}\n   奖品: ${winner.prize}\n\n`
+              messageElements.push(`${index + 1}. `)
+              messageElements.push(h.at(winner.userId))
+              messageElements.push(`\n   奖品: ${winner.prize}\n`)
             })
-            message += `恭喜以上中奖用户！`
+            messageElements.push(`恭喜以上中奖用户！`)
           } else {
-            message += `💨 本次抽奖无人中奖，谢谢参与！`
+            messageElements.push(`💨 本次抽奖无人中奖，谢谢参与！`)
           }
 
           // 使用 bot.sendMessage 发送消息到群聊
           for (const bot of this.ctx.bots) {
             try {
-              await bot.sendMessage(activity.guildId, message)
+              await bot.sendMessage(activity.guildId, messageElements)
               break // 发送成功后跳出循环
             } catch (err) {
               this.logger.warn(`Bot ${bot.sid} 发送开奖通知失败: ${err}`)

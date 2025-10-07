@@ -300,7 +300,7 @@ export function registerRaffleCommands(
 
         if (activity.status === 'drawn' && activity.winners && activity.winners.length > 0) {
           // 只显示真正中奖的用户
-          const realWinners = activity.winners.filter(w => w.prize !== 'None - none')
+          const realWinners = activity.winners.filter(w => w.prize.toLowerCase() !== 'none - none')
           if (realWinners.length > 0) {
             message += `\n🏆 中奖名单:\n`
             realWinners.forEach((w, idx) => {
