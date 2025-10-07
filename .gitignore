@@ -21,3 +21,4 @@ tsconfig.tsbuildinfo
 src/prizes.json
 src/user_entries.json
 
+.claude/settings.local.json

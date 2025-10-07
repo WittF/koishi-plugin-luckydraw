@@ -1,0 +1,152 @@
+import { Context, Logger } from 'koishi'
+import { RaffleActivity } from '../types'
+import { RaffleHandler } from './handler'
+import { formatTime } from '../utils'
+
+export class RaffleTimerManager {
+  private timers = new Map<string, NodeJS.Timeout>()
+
+  constructor(
+    private ctx: Context,
+    private handler: RaffleHandler,
+    private logger: Logger
+  ) {}
+
+  // 执行抽奖开奖
+  async performRaffleDraw(activityId: string, activity: RaffleActivity): Promise<void> {
+    try {
+      this.logger.info(`开始执行抽奖开奖: ${activity.name} (${activityId})`)
+
+      if (activity.participants.length === 0) {
+        this.logger.warn(`抽奖活动 ${activityId} 没有参与者`)
+        activity.status = 'drawn'
+        activity.winners = []
+        const raffleData = await this.handler.loadRaffleData()
+        raffleData[activityId] = activity
+        await this.handler.saveRaffleData(raffleData)
+        return
+      }
+
+      // 计算总奖品数量
+      const totalPrizes = activity.prizes.reduce((sum, p) => sum + p.count, 0)
+
+      // 如果参与人数少于奖品数，所有人都能中奖
+      const winnersCount = Math.min(totalPrizes, activity.participants.length)
+
+      // 打乱参与者顺序
+      const shuffled = [...activity.participants].sort(() => Math.random() - 0.5)
+
+      // 分配奖品
+      const winners: Array<{ userId: string; username: string; prize: string }> = []
+      let participantIndex = 0
+
+      for (const prize of activity.prizes) {
+        for (let i = 0; i < prize.count && participantIndex < winnersCount; i++) {
+          const participant = shuffled[participantIndex]
+          winners.push({
+            userId: participant.userId,
+            username: participant.username,
+            prize: `${prize.name} - ${prize.description}`
+          })
+          participantIndex++
+        }
+      }
+
+      // 为未中奖的参与者分配"未中奖"状态
+      while (participantIndex < shuffled.length) {
+        const participant = shuffled[participantIndex]
+        winners.push({
+          userId: participant.userId,
+          username: participant.username,
+          prize: 'None - none'
+        })
+        participantIndex++
+      }
+
+      // 更新活动状态
+      activity.status = 'drawn'
+      activity.winners = winners
+
+      const raffleData = await this.handler.loadRaffleData()
+      raffleData[activityId] = activity
+      await this.handler.saveRaffleData(raffleData)
+
+      // 发送开奖通知
+      if (activity.guildId) {
+        try {
+          // 只显示真正中奖的用户（排除None - none）
+          const realWinners = winners.filter(w => w.prize !== 'None - none')
+
+          let message = `🎊 抽奖活动 "${activity.name}" 已开奖！\n\n`
+          message += `📊 参与人数: ${activity.participants.length}\n`
+
+          if (realWinners.length > 0) {
+            message += `🎁 中奖名单:\n\n`
+            realWinners.forEach((winner, index) => {
+              message += `${index + 1}. ${winner.username}\n   奖品: ${winner.prize}\n\n`
+            })
+            message += `恭喜以上中奖用户！`
+          } else {
+            message += `💨 本次抽奖无人中奖，谢谢参与！`
+          }
+
+          await this.ctx.broadcast([`${activity.guildId}`], message)
+        } catch (error) {
+          this.logger.error(`发送开奖通知失败: ${error}`)
+        }
+      }
+
+      this.logger.info(`抽奖活动 ${activityId} 开奖完成，共 ${winners.length} 人参与`)
+    } catch (error) {
+      this.logger.error(`执行抽奖开奖失败: ${error}`)
+    }
+  }
+
+  // 设置抽奖定时器
+  scheduleRaffleDraw(activityId: string, activity: RaffleActivity): void {
+    const delay = activity.drawTime - Date.now()
+    if (delay <= 0) {
+      this.performRaffleDraw(activityId, activity)
+      return
+    }
+
+    const timer = setTimeout(() => {
+      this.performRaffleDraw(activityId, activity)
+      this.timers.delete(activityId)
+    }, delay)
+
+    this.timers.set(activityId, timer)
+    this.logger.info(`已设置抽奖定时器: ${activity.name}, 开奖时间: ${formatTime(activity.drawTime)}`)
+  }
+
+  // 初始化已有的抽奖定时器
+  async initializeRaffleTimers(): Promise<void> {
+    try {
+      const raffleData = await this.handler.loadRaffleData()
+      for (const [activityId, activity] of Object.entries(raffleData)) {
+        if (activity.status === 'active' && activity.drawTime > Date.now()) {
+          this.scheduleRaffleDraw(activityId, activity)
+        }
+      }
+      this.logger.info('抽奖定时器初始化完成')
+    } catch (error) {
+      this.logger.error(`初始化抽奖定时器失败: ${error}`)
+    }
+  }
+
+  // 取消定时器
+  cancelTimer(activityId: string): void {
+    const timer = this.timers.get(activityId)
+    if (timer) {
+      clearTimeout(timer)
+      this.timers.delete(activityId)
+    }
+  }
+
+  // 清理所有定时器
+  clearAllTimers(): void {
+    this.timers.forEach(timer => clearTimeout(timer))
+    this.timers.clear()
+    this.logger.info('已清理所有抽奖定时器')
+  }
+}
