@@ -45,18 +45,26 @@ export function registerRaffleCommands(
 
       try {
         // 步骤1: 输入活动名称
-        await sendMessage(session, '📝 请输入抽奖活动名称：')
+        await sendMessage(session, '📝 请输入抽奖活动名称（发送"取消"可退出）：')
         const activityName = await session.prompt(60000)
         if (!activityName) {
           await sendMessage(session, '⏱️ 输入超时，已取消创建。')
           return
         }
+        if (activityName.trim() === '取消') {
+          await sendMessage(session, '❌ 已取消创建抽奖活动。')
+          return
+        }
 
         // 步骤2: 输入开奖时间
-        await sendMessage(session, '⏰ 请输入开奖时间\n支持格式：\n• 相对时间: 1h（1小时后）、30m（30分钟后）、1d（1天后）\n• 今天时间: 18:00\n• 绝对时间: 2024-12-31 18:00')
+        await sendMessage(session, '⏰ 请输入开奖时间（发送"取消"可退出）\n支持格式：\n• 相对时间: 1h（1小时后）、30m（30分钟后）、1d（1天后）\n• 今天时间: 18:00\n• 绝对时间: 2024-12-31 18:00')
         const timeInput = await session.prompt(60000)
         if (!timeInput) {
           await sendMessage(session, '⏱️ 输入超时，已取消创建。')
+          return
+        }
+        if (timeInput.trim() === '取消') {
+          await sendMessage(session, '❌ 已取消创建抽奖活动。')
           return
         }
 
@@ -68,10 +76,14 @@ export function registerRaffleCommands(
         }
 
         // 步骤3: 输入奖品信息
-        await sendMessage(session, '🎁 请输入奖品信息\n格式：奖品名称|奖品描述|数量\n例如：一等奖|iPhone 15 Pro|1\n支持多行输入，每行一个奖品')
+        await sendMessage(session, '🎁 请输入奖品信息（发送"取消"可退出）\n格式：奖品名称|奖品描述|数量\n例如：一等奖|iPhone 15 Pro|1\n支持多行输入，每行一个奖品')
         const prizesInput = await session.prompt(120000)
         if (!prizesInput) {
           await sendMessage(session, '⏱️ 输入超时，已取消创建。')
+          return
+        }
+        if (prizesInput.trim() === '取消') {
+          await sendMessage(session, '❌ 已取消创建抽奖活动。')
           return
         }
 
@@ -103,10 +115,14 @@ export function registerRaffleCommands(
         }
 
         // 步骤4: 询问是否设置口令
-        await sendMessage(session, '🔑 是否设置参与口令？\n发送口令文字，或发送"跳过"不设置口令')
+        await sendMessage(session, '🔑 是否设置参与口令？\n发送口令文字，或发送"跳过"不设置口令，发送"取消"可退出')
         const keywordInput = await session.prompt(60000)
         if (!keywordInput) {
           await sendMessage(session, '⏱️ 输入超时，已取消创建。')
+          return
+        }
+        if (keywordInput.trim() === '取消') {
+          await sendMessage(session, '❌ 已取消创建抽奖活动。')
           return
         }
 
