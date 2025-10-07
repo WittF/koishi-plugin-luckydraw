@@ -90,11 +90,30 @@ export class RaffleTimerManager {
 
           if (realWinners.length > 0) {
             messageElements.push(`🎁 中奖名单:\n\n`)
-            realWinners.forEach((winner, index) => {
-              messageElements.push(`${index + 1}. `)
-              messageElements.push(h.at(winner.userId))
-              messageElements.push(`\n   奖品: ${winner.prize}\n`)
+
+            // 按奖品名称分组
+            const prizeGroups = new Map<string, Array<{ userId: string; username: string }>>()
+            realWinners.forEach(winner => {
+              if (!prizeGroups.has(winner.prize)) {
+                prizeGroups.set(winner.prize, [])
+              }
+              prizeGroups.get(winner.prize).push({
+                userId: winner.userId,
+                username: winner.username
+              })
             })
+
+            // 按奖品显示中奖者
+            prizeGroups.forEach((winners, prizeName) => {
+              messageElements.push(`【${prizeName}】\n`)
+              winners.forEach(winner => {
+                messageElements.push('- ')
+                messageElements.push(h.at(winner.userId))
+                messageElements.push('\n')
+              })
+              messageElements.push('\n')
+            })
+
             messageElements.push(`恭喜以上中奖用户！`)
           } else {
             messageElements.push(`💨 本次抽奖无人中奖，谢谢参与！`)

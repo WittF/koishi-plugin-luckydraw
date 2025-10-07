@@ -1,4 +1,4 @@
-import { Context, Logger } from 'koishi'
+import { Context, Logger, h } from 'koishi'
 import * as path from 'path'
 import * as fs from 'fs/promises'
 import { Config, schema } from './types'
@@ -103,6 +103,7 @@ export function apply(ctx: Context, config: Config) {
           // 发送临时消息，5秒后撤回
           try {
             const sentMessages = await session.send([
+              h.quote(session.messageId),
               `✅ ${activity.name} 参与成功！\n🆔 活动ID: ${activityId}\n👥 当前参与人数：${activity.participants.length}`
             ])
 
