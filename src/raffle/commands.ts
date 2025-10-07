@@ -4,6 +4,21 @@ import { RaffleHandler } from './handler'
 import { RaffleTimerManager } from './timer'
 import { sendMessage, generateActivityId, checkAdmin, formatTime, parseTimeString } from '../utils'
 
+// 辅助函数：检查是否为 None 奖品（谢谢参与）
+function isNonePrize(prize: RafflePrize): boolean {
+  return prize.name.toLowerCase() === 'none' && prize.description.toLowerCase() === 'none'
+}
+
+// 辅助函数：过滤掉 None 奖品
+function filterRealPrizes(prizes: RafflePrize[]): RafflePrize[] {
+  return prizes.filter(p => !isNonePrize(p))
+}
+
+// 辅助函数：计算真实奖品总数（排除 None）
+function countRealPrizes(prizes: RafflePrize[]): number {
+  return filterRealPrizes(prizes).reduce((sum, p) => sum + p.count, 0)
+}
+
 export function registerRaffleCommands(
   ctx: Context,
   config: Config,
@@ -45,14 +60,10 @@ export function registerRaffleCommands(
           return
         }
 
-        const drawTime = parseTimeString(timeInput)
-        if (!drawTime) {
+        // 先验证时间格式，但不立即计算时间戳（等所有步骤完成后再计算）
+        const testDrawTime = parseTimeString(timeInput)
+        if (!testDrawTime) {
           await sendMessage(session, '❌ 时间格式无效，请重试。')
-          return
-        }
-
-        if (drawTime <= Date.now()) {
-          await sendMessage(session, '❌ 开奖时间必须晚于当前时间！')
           return
         }
 
@@ -101,6 +112,13 @@ export function registerRaffleCommands(
 
         const keyword = keywordInput.trim() === '跳过' ? undefined : keywordInput.trim()
 
+        // 所有步骤完成后，重新计算开奖时间（确保相对时间从现在开始计算）
+        const drawTime = parseTimeString(timeInput)
+        if (!drawTime || drawTime <= Date.now()) {
+          await sendMessage(session, '❌ 开奖时间必须晚于当前时间！请重新创建。')
+          return
+        }
+
         // 创建抽奖活动
         const activityId = generateActivityId()
         const activity = {
@@ -124,7 +142,8 @@ export function registerRaffleCommands(
         timerManager.scheduleRaffleDraw(activityId, activity)
 
         // 发送确认消息
-        const totalPrizes = prizes.reduce((sum, p) => sum + p.count, 0)
+        const realPrizes = filterRealPrizes(prizes)
+        const totalPrizes = countRealPrizes(prizes)
         let confirmMsg = `✅ 抽奖活动创建成功！\n\n`
         confirmMsg += `🎉 活动名称: ${activityName}\n`
         confirmMsg += `🆔 活动ID: ${activityId}\n`
@@ -134,7 +153,7 @@ export function registerRaffleCommands(
           confirmMsg += `🔑 参与口令: ${keyword}\n`
         }
         confirmMsg += `\n📋 奖品列表:\n`
-        prizes.forEach((p, idx) => {
+        realPrizes.forEach((p, idx) => {
           confirmMsg += `${idx + 1}. ${p.name} - ${p.description} (${p.count}个)\n`
         })
         confirmMsg += `\n💡 用户可使用 `
@@ -201,7 +220,7 @@ export function registerRaffleCommands(
         raffleData[activityId] = activity
         await handler.saveRaffleData(raffleData)
 
-        await sendMessage(session, `✅ 参与成功！\n\n🎉 活动名称: ${activity.name}\n⏰ 开奖时间: ${formatTime(activity.drawTime)}\n👥 当前参与人数: ${activity.participants.length}`)
+        await sendMessage(session, `✅ ${activity.name} 参与成功！\n🆔 活动ID: ${activityId}\n👥 当前参与人数：${activity.participants.length}`)
 
         if (config.debugMode) {
           logger.info(`用户 ${session.username} (${session.userId}) 参与了抽奖活动 ${activityId}`)
@@ -230,7 +249,7 @@ export function registerRaffleCommands(
 
         let message = `📋 进行中的抽奖活动（${activities.length}个）:\n\n`
         activities.forEach((activity, idx) => {
-          const totalPrizes = activity.prizes.reduce((sum, p) => sum + p.count, 0)
+          const totalPrizes = countRealPrizes(activity.prizes)
           message += `${idx + 1}. ${activity.name}\n`
           message += `   🆔 ID: ${activity.id}\n`
           message += `   ⏰ 开奖: ${formatTime(activity.drawTime)}\n`
@@ -264,7 +283,8 @@ export function registerRaffleCommands(
           return
         }
 
-        const totalPrizes = activity.prizes.reduce((sum, p) => sum + p.count, 0)
+        const realPrizes = filterRealPrizes(activity.prizes)
+        const totalPrizes = countRealPrizes(activity.prizes)
         let message = `🎊 抽奖活动详情\n\n`
         message += `📝 活动名称: ${activity.name}\n`
         message += `🆔 活动ID: ${activity.id}\n`
@@ -274,7 +294,7 @@ export function registerRaffleCommands(
         message += `🎁 奖品总数: ${totalPrizes} 个\n\n`
 
         message += `📋 奖品列表:\n`
-        activity.prizes.forEach((p, idx) => {
+        realPrizes.forEach((p, idx) => {
           message += `${idx + 1}. ${p.name} - ${p.description} (${p.count}个)\n`
         })
 

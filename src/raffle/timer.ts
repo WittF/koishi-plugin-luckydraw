@@ -13,24 +13,32 @@ export class RaffleTimerManager {
   ) {}
 
   // 执行抽奖开奖
-  async performRaffleDraw(activityId: string, activity: RaffleActivity): Promise<void> {
+  async performRaffleDraw(activityId: string): Promise<void> {
     try {
+      // 重新加载最新的活动数据
+      const raffleData = await this.handler.loadRaffleData()
+      const activity = raffleData[activityId]
+
+      if (!activity) {
+        this.logger.error(`抽奖活动 ${activityId} 不存在`)
+        return
+      }
+
       this.logger.info(`开始执行抽奖开奖: ${activity.name} (${activityId})`)
 
       if (activity.participants.length === 0) {
         this.logger.warn(`抽奖活动 ${activityId} 没有参与者`)
         activity.status = 'drawn'
         activity.winners = []
-        const raffleData = await this.handler.loadRaffleData()
         raffleData[activityId] = activity
         await this.handler.saveRaffleData(raffleData)
         return
       }
 
-      // 计算总奖品数量
+      // 计算总奖品数量（包含None奖品，用于分配逻辑）
       const totalPrizes = activity.prizes.reduce((sum, p) => sum + p.count, 0)
 
-      // 如果参与人数少于奖品数，所有人都能中奖
+      // 如果参与人数少于奖品总数，所有人都能中奖
       const winnersCount = Math.min(totalPrizes, activity.participants.length)
 
       // 打乱参与者顺序
@@ -66,8 +74,6 @@ export class RaffleTimerManager {
       // 更新活动状态
       activity.status = 'drawn'
       activity.winners = winners
-
-      const raffleData = await this.handler.loadRaffleData()
       raffleData[activityId] = activity
       await this.handler.saveRaffleData(raffleData)
 
@@ -106,12 +112,12 @@ export class RaffleTimerManager {
   scheduleRaffleDraw(activityId: string, activity: RaffleActivity): void {
     const delay = activity.drawTime - Date.now()
     if (delay <= 0) {
-      this.performRaffleDraw(activityId, activity)
+      this.performRaffleDraw(activityId)
       return
     }
 
     const timer = setTimeout(() => {
-      this.performRaffleDraw(activityId, activity)
+      this.performRaffleDraw(activityId)
       this.timers.delete(activityId)
     }, delay)
 

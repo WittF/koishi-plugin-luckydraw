@@ -100,10 +100,29 @@ export function apply(ctx: Context, config: Config) {
           raffleData[activityId] = activity
           await raffleHandler.saveRaffleData(raffleData)
 
-          // 简单确认消息，不使用 sendMessage
-          await session.send([
-            `✅ 口令正确！参与成功！\n\n🎉 活动: ${activity.name}\n👥 参与人数: ${activity.participants.length}`
-          ])
+          // 发送临时消息，5秒后撤回
+          try {
+            const sentMessages = await session.send([
+              `✅ ${activity.name} 参与成功！\n🆔 活动ID: ${activityId}\n👥 当前参与人数：${activity.participants.length}`
+            ])
+
+            // 5秒后撤回消息
+            setTimeout(async () => {
+              try {
+                if (sentMessages && sentMessages.length > 0) {
+                  await session.bot.deleteMessage(session.channelId, sentMessages[0])
+                }
+              } catch (error) {
+                if (config.debugMode) {
+                  logger.warn(`撤回口令参与消息失败: ${error}`)
+                }
+              }
+            }, 5000)
+          } catch (error) {
+            if (config.debugMode) {
+              logger.error(`发送口令参与消息失败: ${error}`)
+            }
+          }
 
           if (config.debugMode) {
             logger.info(`用户 ${session.username} (${session.userId}) 通过口令参与了抽奖 ${activityId}`)
