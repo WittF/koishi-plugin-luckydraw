@@ -125,7 +125,7 @@ export function apply(ctx: Context, config: Config) {
           }
 
           if (config.debugMode) {
-            logger.info(`用户 ${session.username} (${session.userId}) 通过口令参与了抽奖 ${activityId}`)
+            logger.info(`用户 ${session.username} (${session.userId}) 通过口令"${activity.keyword}"参与了抽奖活动 ${activityId}`)
           }
 
           return
