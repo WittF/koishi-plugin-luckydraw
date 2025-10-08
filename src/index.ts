@@ -148,33 +148,36 @@ export function apply(ctx: Context, config: Config) {
 
     try {
       const raffleData = await raffleHandler.loadRaffleData()
+      const activities = Object.entries(raffleData)
+
+      logger.info(`[抽奖参与] 当前活动总数: ${activities.length}`)
 
       // 查找匹配的活动（消息ID匹配）
-      for (const [activityId, activity] of Object.entries(raffleData)) {
+      for (const [activityId, activity] of activities) {
+        logger.info(`[抽奖参与] 检查活动 ${activityId}: announceMessageId=${activity.announceMessageId} (类型: ${typeof activity.announceMessageId}), messageId=${messageId} (类型: ${typeof messageId}), status=${activity.status}, emojiId=${activity.emojiId}`)
+
         if (
-          activity.announceMessageId === messageId &&
+          activity.announceMessageId?.toString() === messageId?.toString() &&
           activity.status === 'active' &&
           activity.emojiId
         ) {
-          if (config.debugMode) {
-            logger.info(`[抽奖参与] 找到匹配活动: ${activityId}, 要求表情: ${activity.emojiId}`)
-          }
+          logger.info(`[抽奖参与] 找到匹配活动: ${activityId}, 要求表情: ${activity.emojiId}`)
 
           // 检查表情回应中是否包含活动要求的表情
           const hasRequiredEmoji = likes.some(like => like.emoji_id === activity.emojiId)
+          logger.info(`[抽奖参与] 表情匹配检查: 要求=${activity.emojiId}, 收到=${JSON.stringify(likes)}, 匹配=${hasRequiredEmoji}`)
+
           if (!hasRequiredEmoji) {
-            if (config.debugMode) {
-              logger.info(`[抽奖参与] 表情不匹配，跳过`)
-            }
+            logger.info(`[抽奖参与] 表情不匹配，跳过`)
             continue
           }
 
           // 检查是否已经参与
           const alreadyJoined = activity.participants.some(p => p.userId === userId)
+          logger.info(`[抽奖参与] 用户参与检查: userId=${userId}, 已参与=${alreadyJoined}, 当前参与人数=${activity.participants.length}`)
+
           if (alreadyJoined) {
-            if (config.debugMode) {
-              logger.info(`[抽奖参与] 用户已参与，跳过`)
-            }
+            logger.info(`[抽奖参与] 用户已参与，跳过`)
             continue
           }
 

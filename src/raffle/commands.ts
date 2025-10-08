@@ -284,27 +284,33 @@ export function registerRaffleCommands(
         // 发送活动播报到目标群
         try {
           const announceMessages = await session.bot.sendMessage(guildId, announceMsg)
+          logger.info(`[抽奖创建] 播报消息返回: ${JSON.stringify(announceMessages)}`)
+
           const announceMessageId = Array.isArray(announceMessages) && announceMessages.length > 0 ? announceMessages[0] : null
+          logger.info(`[抽奖创建] 提取播报消息ID: ${announceMessageId}`)
 
           // 保存播报消息ID
           if (announceMessageId) {
             activity.announceMessageId = announceMessageId
             raffleData[activityId] = activity
             await handler.saveRaffleData(raffleData)
+            logger.info(`[抽奖创建] 已保存播报消息ID到活动 ${activityId}`)
 
             // 如果使用表情参与，bot给播报消息添加表情回应以展示参与表情
             if (emojiId) {
               try {
                 const bot = session.bot as any
                 if (bot.internal?.setMsgEmojiLike) {
+                  logger.info(`[抽奖创建] 尝试给播报消息添加表情: ${emojiId}`)
                   await bot.internal.setMsgEmojiLike(announceMessageId, emojiId)
+                  logger.info(`[抽奖创建] 成功添加表情回应`)
                 }
               } catch (error) {
-                if (config.debugMode) {
-                  logger.warn(`添加表情回应失败: ${error}`)
-                }
+                logger.warn(`[抽奖创建] 添加表情回应失败: ${error}`)
               }
             }
+          } else {
+            logger.warn(`[抽奖创建] 未获取到播报消息ID`)
           }
 
           // 发送创建成功确认消息
