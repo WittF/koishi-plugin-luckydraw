@@ -146,6 +146,11 @@ export function registerRaffleCommands(
           const promptMessages = await sendMessage(session, '🔑 设置要求表情\n使用特定表情回应这条消息以设置（60秒内有效）')
           const promptMessageId = Array.isArray(promptMessages) && promptMessages.length > 0 ? promptMessages[0] : null
 
+          if (config.debugMode) {
+            logger.info(`发送提示消息，返回的消息ID: ${promptMessageId}`)
+            logger.info(`promptMessages:`, promptMessages)
+          }
+
           if (!promptMessageId) {
             await sendMessage(session, '❌ 无法获取消息ID，请重新创建。')
             return
@@ -159,26 +164,44 @@ export function registerRaffleCommands(
             }, 60000)
 
             const dispose = ctx.on('internal/session', (emojiSession) => {
+              if (config.debugMode) {
+                logger.info(`[创建流程] 收到 internal/session 事件: type=${emojiSession.type}, subtype=${emojiSession.subtype}`)
+              }
+
               if (emojiSession.type !== 'notice' || emojiSession.subtype !== 'group-msg-emoji-like') {
                 return
               }
 
               const data = emojiSession.onebot as any
 
-              // 检查：回应消息ID是否匹配
-              if (data.message_id !== promptMessageId) {
+              if (config.debugMode) {
+                logger.info(`[创建流程] 收到表情回应事件: message_id=${data.message_id}, promptMessageId=${promptMessageId}`)
+                logger.info(`[创建流程] 表情回应数据:`, JSON.stringify(data))
+              }
+
+              // 检查：回应消息ID是否匹配（转为字符串比较）
+              if (data.message_id?.toString() !== promptMessageId?.toString()) {
+                if (config.debugMode) {
+                  logger.info(`消息ID不匹配: ${data.message_id} !== ${promptMessageId}`)
+                }
                 return
               }
 
               // 检查：回应用户是否是创建人
-              const likeUserId = data.likes?.[0]?.user_id?.toString()
+              const likeUserId = data.user_id?.toString()
               if (likeUserId !== userId) {
+                if (config.debugMode) {
+                  logger.info(`用户ID不匹配: ${likeUserId} !== ${userId}`)
+                }
                 return
               }
 
-              // 获取 emoji_id
+              // 获取 emoji_id（从 likes 数组中取第一个表情）
               const receivedEmojiId = data.likes?.[0]?.emoji_id
               if (receivedEmojiId) {
+                if (config.debugMode) {
+                  logger.info(`收到有效表情ID: ${receivedEmojiId}`)
+                }
                 clearTimeout(timeout)
                 dispose()
                 resolve(receivedEmojiId)

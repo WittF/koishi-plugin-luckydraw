@@ -135,9 +135,14 @@ export function apply(ctx: Context, config: Config) {
 
     const data = session.onebot as any
     const messageId = data.message_id
+    const userId = data.user_id?.toString()
     const likes = data.likes || []
 
-    if (!messageId || likes.length === 0) {
+    if (config.debugMode) {
+      logger.info(`[抽奖参与] 收到表情回应事件: messageId=${messageId}, userId=${userId}, likes=${JSON.stringify(likes)}`)
+    }
+
+    if (!messageId || !userId || likes.length === 0) {
       return
     }
 
@@ -151,52 +156,57 @@ export function apply(ctx: Context, config: Config) {
           activity.status === 'active' &&
           activity.emojiId
         ) {
-          // 处理每个表情回应
-          for (const like of likes) {
-            const likeUserId = like.user_id?.toString()
-            const likeEmojiId = like.emoji_id
+          if (config.debugMode) {
+            logger.info(`[抽奖参与] 找到匹配活动: ${activityId}, 要求表情: ${activity.emojiId}`)
+          }
 
-            // 检查表情ID是否匹配
-            if (likeEmojiId !== activity.emojiId) {
-              continue
-            }
-
-            // 检查是否已经参与
-            const alreadyJoined = activity.participants.some(p => p.userId === likeUserId)
-            if (alreadyJoined) {
-              continue
-            }
-
-            // 获取用户信息
-            const username = session.username || '未知用户'
-
-            // 添加参与者
-            activity.participants.push({
-              userId: likeUserId,
-              username: username,
-              joinedAt: Date.now()
-            })
-
-            raffleData[activityId] = activity
-            await raffleHandler.saveRaffleData(raffleData)
-
-            // 发送临时消息，5秒后撤回
-            const guildId = activity.guildId || session.guildId
-            if (guildId) {
-              await sendTemporaryJoinMessage(
-                session.bot,
-                guildId,
-                activity.name,
-                activityId,
-                activity.participants.length,
-                config.debugMode,
-                logger
-              )
-            }
-
+          // 检查表情回应中是否包含活动要求的表情
+          const hasRequiredEmoji = likes.some(like => like.emoji_id === activity.emojiId)
+          if (!hasRequiredEmoji) {
             if (config.debugMode) {
-              logger.info(`用户 ${username} (${likeUserId}) 通过表情回应参与了抽奖活动 ${activityId}`)
+              logger.info(`[抽奖参与] 表情不匹配，跳过`)
             }
+            continue
+          }
+
+          // 检查是否已经参与
+          const alreadyJoined = activity.participants.some(p => p.userId === userId)
+          if (alreadyJoined) {
+            if (config.debugMode) {
+              logger.info(`[抽奖参与] 用户已参与，跳过`)
+            }
+            continue
+          }
+
+          // 获取用户信息
+          const username = session.username || '未知用户'
+
+          // 添加参与者
+          activity.participants.push({
+            userId: userId,
+            username: username,
+            joinedAt: Date.now()
+          })
+
+          raffleData[activityId] = activity
+          await raffleHandler.saveRaffleData(raffleData)
+
+          if (config.debugMode) {
+            logger.info(`[抽奖参与] 用户 ${username} (${userId}) 成功参与抽奖活动 ${activityId}`)
+          }
+
+          // 发送临时消息，5秒后撤回
+          const guildId = activity.guildId || session.guildId
+          if (guildId) {
+            await sendTemporaryJoinMessage(
+              session.bot,
+              guildId,
+              activity.name,
+              activityId,
+              activity.participants.length,
+              config.debugMode,
+              logger
+            )
           }
 
           break
@@ -204,7 +214,7 @@ export function apply(ctx: Context, config: Config) {
       }
     } catch (error) {
       if (config.debugMode) {
-        logger.error(`处理表情回应参与时出错: ${error}`)
+        logger.error(`[抽奖参与] 处理表情回应参与时出错: ${error}`)
       }
     }
   })
