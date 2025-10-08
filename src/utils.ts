@@ -83,3 +83,38 @@ export async function sendMessage(session: Session, content: string | any[]): Pr
     console.error('发送消息失败:', error)
   }
 }
+
+// 发送临时参与成功消息（5秒后撤回）
+export async function sendTemporaryJoinMessage(
+  bot: any,
+  guildId: string,
+  activityName: string,
+  activityId: string,
+  participantCount: number,
+  debugMode: boolean,
+  logger: any
+): Promise<void> {
+  try {
+    const sentMessages = await bot.sendMessage(
+      guildId,
+      `✅ ${activityName} 参与成功！\n🆔 活动ID: ${activityId}\n👥 当前参与人数：${participantCount}`
+    )
+
+    // 5秒后撤回消息
+    setTimeout(async () => {
+      try {
+        if (sentMessages && sentMessages.length > 0) {
+          await bot.deleteMessage(guildId, sentMessages[0])
+        }
+      } catch (error) {
+        if (debugMode) {
+          logger.warn(`撤回参与消息失败: ${error}`)
+        }
+      }
+    }, 5000)
+  } catch (error) {
+    if (debugMode) {
+      logger.error(`发送参与消息失败: ${error}`)
+    }
+  }
+}

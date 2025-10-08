@@ -7,6 +7,7 @@ import { registerLotteryCommands } from './lottery/commands'
 import { RaffleHandler } from './raffle/handler'
 import { RaffleTimerManager } from './raffle/timer'
 import { registerRaffleCommands } from './raffle/commands'
+import { sendTemporaryJoinMessage } from './utils'
 
 export const name = 'lucky-draw'
 export { Config, schema } from './types'
@@ -101,29 +102,15 @@ export function apply(ctx: Context, config: Config) {
           await raffleHandler.saveRaffleData(raffleData)
 
           // 发送临时消息，5秒后撤回
-          try {
-            const sentMessages = await session.send([
-              h.quote(session.messageId),
-              `✅ ${activity.name} 参与成功！\n🆔 活动ID: ${activityId}\n👥 当前参与人数：${activity.participants.length}`
-            ])
-
-            // 5秒后撤回消息
-            setTimeout(async () => {
-              try {
-                if (sentMessages && sentMessages.length > 0) {
-                  await session.bot.deleteMessage(session.channelId, sentMessages[0])
-                }
-              } catch (error) {
-                if (config.debugMode) {
-                  logger.warn(`撤回口令参与消息失败: ${error}`)
-                }
-              }
-            }, 5000)
-          } catch (error) {
-            if (config.debugMode) {
-              logger.error(`发送口令参与消息失败: ${error}`)
-            }
-          }
+          await sendTemporaryJoinMessage(
+            session.bot,
+            session.guildId,
+            activity.name,
+            activityId,
+            activity.participants.length,
+            config.debugMode,
+            logger
+          )
 
           if (config.debugMode) {
             logger.info(`用户 ${session.username} (${session.userId}) 通过口令"${activity.keyword}"参与了抽奖活动 ${activityId}`)
@@ -194,31 +181,17 @@ export function apply(ctx: Context, config: Config) {
             await raffleHandler.saveRaffleData(raffleData)
 
             // 发送临时消息，5秒后撤回
-            try {
-              const guildId = activity.guildId || session.guildId
-              if (guildId) {
-                const sentMessages = await session.bot.sendMessage(
-                  guildId,
-                  `✅ ${activity.name} 参与成功！\n🆔 活动ID: ${activityId}\n👥 当前参与人数：${activity.participants.length}`
-                )
-
-                // 5秒后撤回消息
-                setTimeout(async () => {
-                  try {
-                    if (sentMessages && sentMessages.length > 0) {
-                      await session.bot.deleteMessage(guildId, sentMessages[0])
-                    }
-                  } catch (error) {
-                    if (config.debugMode) {
-                      logger.warn(`撤回表情参与消息失败: ${error}`)
-                    }
-                  }
-                }, 5000)
-              }
-            } catch (error) {
-              if (config.debugMode) {
-                logger.error(`发送表情参与消息失败: ${error}`)
-              }
+            const guildId = activity.guildId || session.guildId
+            if (guildId) {
+              await sendTemporaryJoinMessage(
+                session.bot,
+                guildId,
+                activity.name,
+                activityId,
+                activity.participants.length,
+                config.debugMode,
+                logger
+              )
             }
 
             if (config.debugMode) {
