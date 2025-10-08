@@ -1,5 +1,12 @@
 import { Schema } from 'koishi'
 
+// ===== 类型扩展 =====
+declare module 'koishi' {
+  interface Session {
+    onebot?: any
+  }
+}
+
 // ===== 配置接口 =====
 export interface Config {
   adminQQ: string   // 管理员 QQ 号
@@ -49,6 +56,8 @@ export interface RaffleActivity {
   createdBy: string
   createdAt: number
   keyword?: string  // 参与口令
+  emojiId?: string  // 参与表情ID
+  announceMessageId?: string  // 活动播报消息ID（用于监听表情回应）
   winners?: Array<{ userId: string; username: string; prize: string }>
 }
 

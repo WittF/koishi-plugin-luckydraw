@@ -69,7 +69,7 @@ export function parseTimeString(timeStr: string): number | null {
 }
 
 // 封装发送消息的函数
-export async function sendMessage(session: Session, content: string | any[]): Promise<void> {
+export async function sendMessage(session: Session, content: string | any[]): Promise<string[] | void> {
   try {
     const formattedContent = Array.isArray(content) ? content.join(' ') : content
 
@@ -78,7 +78,7 @@ export async function sendMessage(session: Session, content: string | any[]): Pr
       ? [h.quote(session.messageId), formattedContent]
       : [h.quote(session.messageId), h.at(session.userId), '\n', formattedContent]
 
-    await session.send(promptMessage.flat())
+    return await session.send(promptMessage.flat())
   } catch (error) {
     console.error('发送消息失败:', error)
   }

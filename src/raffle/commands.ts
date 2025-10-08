@@ -1,5 +1,5 @@
 import { Context, Logger, Session } from 'koishi'
-import { Config, RafflePrize } from '../types'
+import { Config, RafflePrize, RaffleActivity } from '../types'
 import { RaffleHandler } from './handler'
 import { RaffleTimerManager } from './timer'
 import { sendMessage, generateActivityId, checkAdmin, formatTime, parseTimeString } from '../utils'
@@ -118,7 +118,7 @@ export function registerRaffleCommands(
         }
 
         // 步骤4: 询问是否设置口令
-        await sendMessage(session, '🔑 是否设置参与口令？\n发送口令文字，或发送"跳过"不设置口令，发送"取消"可退出')
+        await sendMessage(session, '🔑 设置参与口令？\n发送口令文字，或发送"跳过"改为设置回应特定表情，发送"取消"可退出')
         const keywordInput = await session.prompt(60000)
         if (!keywordInput) {
           await sendMessage(session, '⏱️ 输入超时，已取消创建。')
@@ -129,7 +129,76 @@ export function registerRaffleCommands(
           return
         }
 
-        const keyword = keywordInput.trim() === '跳过' ? undefined : keywordInput.trim()
+        let keyword: string | undefined = undefined
+        let emojiId: string | undefined = undefined
+
+        if (keywordInput.trim() !== '跳过') {
+          // 用户设置了口令
+          keyword = keywordInput.trim()
+        } else {
+          // 步骤5: 用户跳过口令，设置表情
+          const promptMessages = await sendMessage(session, '🔑 设置要求表情？\n使用特定表情回应这条消息以设置（60秒内有效）')
+          const promptMessageId = Array.isArray(promptMessages) && promptMessages.length > 0 ? promptMessages[0] : null
+
+          if (!promptMessageId) {
+            await sendMessage(session, '❌ 无法获取消息ID，请重新创建。')
+            return
+          }
+
+          // 监听表情回应事件
+          const emojiPromise = new Promise<string | null>((resolve) => {
+            const timeout = setTimeout(() => {
+              dispose()
+              resolve(null)
+            }, 60000)
+
+            const dispose = ctx.on('internal/session', (emojiSession) => {
+              if (emojiSession.type !== 'notice' || emojiSession.subtype !== 'group-msg-emoji-like') {
+                return
+              }
+
+              const data = emojiSession.onebot as any
+
+              // 检查：回应消息ID是否匹配
+              if (data.message_id !== promptMessageId) {
+                return
+              }
+
+              // 检查：回应用户是否是创建人
+              const likeUserId = data.likes?.[0]?.user_id?.toString()
+              if (likeUserId !== userId) {
+                return
+              }
+
+              // 获取 emoji_id
+              const receivedEmojiId = data.likes?.[0]?.emoji_id
+              if (receivedEmojiId) {
+                clearTimeout(timeout)
+                dispose()
+                resolve(receivedEmojiId)
+              }
+            })
+          })
+
+          emojiId = await emojiPromise
+
+          if (!emojiId) {
+            await sendMessage(session, '⏱️ 未在60秒内收到有效的表情回应，已取消创建。')
+            return
+          }
+
+          // 使用 bot.internal API 发送带表情的确认消息
+          try {
+            const bot = session.bot as any
+            if (bot.internal?.setMsgEmojiLike) {
+              await sendMessage(session, `✅ 已设置参与表情（表情ID: ${emojiId}）`)
+            } else {
+              await sendMessage(session, `✅ 已设置参与表情（表情ID: ${emojiId}）`)
+            }
+          } catch {
+            await sendMessage(session, `✅ 已设置参与表情（表情ID: ${emojiId}）`)
+          }
+        }
 
         // 所有步骤完成后，重新计算开奖时间（确保相对时间从现在开始计算）
         const drawTime = parseTimeString(timeInput)
@@ -140,17 +209,18 @@ export function registerRaffleCommands(
 
         // 创建抽奖活动
         const activityId = generateActivityId()
-        const activity = {
+        const activity: RaffleActivity = {
           id: activityId,
           name: activityName,
           guildId: guildId,
           prizes,
           participants: [],
           drawTime,
-          status: 'active' as const,
+          status: 'active',
           createdBy: userId,
           createdAt: Date.now(),
-          keyword
+          keyword,
+          emojiId
         }
 
         const raffleData = await handler.loadRaffleData()
@@ -160,39 +230,62 @@ export function registerRaffleCommands(
         // 设置定时开奖
         timerManager.scheduleRaffleDraw(activityId, activity)
 
-        // 发送确认消息
+        // 构建活动播报消息
         const realPrizes = filterRealPrizes(prizes)
         const totalPrizes = countRealPrizes(prizes)
-        let confirmMsg = `✅ 抽奖活动创建成功！\n\n`
-        confirmMsg += `🎉 活动名称: ${activityName}\n`
-        confirmMsg += `🆔 活动ID: ${activityId}\n`
-        confirmMsg += `⏰ 开奖时间: ${formatTime(drawTime)}\n`
-        confirmMsg += `🎁 奖品总数: ${totalPrizes} 个\n`
-        if (keyword) {
-          confirmMsg += `🔑 参与口令: ${keyword}\n`
-        }
-        confirmMsg += `\n📋 奖品列表:\n`
+        let announceMsg = `🎊 抽奖活动\n\n`
+        announceMsg += `📝 活动名称: ${activityName}\n`
+        announceMsg += `🆔 活动ID: ${activityId}\n`
+        announceMsg += `📊 状态: 进行中\n`
+        announceMsg += `⏰ 开奖时间: ${formatTime(drawTime)}\n`
+        announceMsg += `👥 参与人数: 0\n`
+        announceMsg += `🎁 奖品总数: ${totalPrizes} 个\n\n`
+        announceMsg += `📋 奖品列表:\n`
         realPrizes.forEach((p, idx) => {
-          confirmMsg += `${idx + 1}. ${p.name} - ${p.description} (${p.count}个)\n`
+          announceMsg += `${idx + 1}. ${p.name} - ${p.description} (${p.count}个)\n`
         })
-        confirmMsg += `\n💡 用户可使用 `
+        announceMsg += `\n💡 参与方式: `
         if (keyword) {
-          confirmMsg += `发送口令"${keyword}" 或执行 raffle.join ${activityId} 参与抽奖`
-        } else {
-          confirmMsg += `raffle.join ${activityId} 参与抽奖`
+          announceMsg += `发送口令"${keyword}"`
+        } else if (emojiId) {
+          announceMsg += `使用指定表情回应本消息`
         }
 
-        // 如果指定了目标群号，发送到目标群；否则发送到当前会话
-        if (targetGuildId) {
-          try {
-            await session.bot.sendMessage(targetGuildId, confirmMsg)
-            await sendMessage(session, `✅ 抽奖活动已创建并发送到群 ${targetGuildId}`)
-          } catch (error) {
-            logger.error(`发送抽奖信息到群 ${targetGuildId} 失败: ${error}`)
-            await sendMessage(session, `✅ 抽奖活动已创建，但发送到群 ${targetGuildId} 失败\n\n${confirmMsg}`)
+        // 发送活动播报到目标群
+        try {
+          const announceMessages = await session.bot.sendMessage(guildId, announceMsg)
+          const announceMessageId = Array.isArray(announceMessages) && announceMessages.length > 0 ? announceMessages[0] : null
+
+          // 保存播报消息ID
+          if (announceMessageId) {
+            activity.announceMessageId = announceMessageId
+            raffleData[activityId] = activity
+            await handler.saveRaffleData(raffleData)
+
+            // 如果使用表情参与，bot给播报消息添加表情回应以展示参与表情
+            if (emojiId) {
+              try {
+                const bot = session.bot as any
+                if (bot.internal?.setMsgEmojiLike) {
+                  await bot.internal.setMsgEmojiLike(announceMessageId, emojiId)
+                }
+              } catch (error) {
+                if (config.debugMode) {
+                  logger.warn(`添加表情回应失败: ${error}`)
+                }
+              }
+            }
           }
-        } else {
-          await sendMessage(session, confirmMsg)
+
+          // 发送创建成功确认消息
+          if (targetGuildId) {
+            await sendMessage(session, `✅ 抽奖活动创建成功并已发送到群 ${targetGuildId}`)
+          } else {
+            await sendMessage(session, `✅ 抽奖活动创建成功！`)
+          }
+        } catch (error) {
+          logger.error(`发送抽奖播报到群 ${guildId} 失败: ${error}`)
+          await sendMessage(session, `✅ 抽奖活动已创建，但发送到群失败\n\n${announceMsg}`)
         }
 
         if (config.debugMode) {
@@ -343,6 +436,8 @@ export function registerRaffleCommands(
 
         if (activity.keyword) {
           message += `\n🔑 参与口令: ${activity.keyword}`
+        } else if (activity.emojiId) {
+          message += `\n🔑 参与方式: 使用指定表情回应播报消息`
         }
 
         await sendMessage(session, message)

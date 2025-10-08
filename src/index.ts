@@ -140,6 +140,102 @@ export function apply(ctx: Context, config: Config) {
     }
   })
 
+  // 监听表情回应事件，处理抽奖参与
+  ctx.on('internal/session', async (session) => {
+    if (session.type !== 'notice' || session.subtype !== 'group-msg-emoji-like') {
+      return
+    }
+
+    const data = session.onebot as any
+    const messageId = data.message_id
+    const likes = data.likes || []
+
+    if (!messageId || likes.length === 0) {
+      return
+    }
+
+    try {
+      const raffleData = await raffleHandler.loadRaffleData()
+
+      // 查找匹配的活动（消息ID匹配）
+      for (const [activityId, activity] of Object.entries(raffleData)) {
+        if (
+          activity.announceMessageId === messageId &&
+          activity.status === 'active' &&
+          activity.emojiId
+        ) {
+          // 处理每个表情回应
+          for (const like of likes) {
+            const likeUserId = like.user_id?.toString()
+            const likeEmojiId = like.emoji_id
+
+            // 检查表情ID是否匹配
+            if (likeEmojiId !== activity.emojiId) {
+              continue
+            }
+
+            // 检查是否已经参与
+            const alreadyJoined = activity.participants.some(p => p.userId === likeUserId)
+            if (alreadyJoined) {
+              continue
+            }
+
+            // 获取用户信息
+            const username = session.username || '未知用户'
+
+            // 添加参与者
+            activity.participants.push({
+              userId: likeUserId,
+              username: username,
+              joinedAt: Date.now()
+            })
+
+            raffleData[activityId] = activity
+            await raffleHandler.saveRaffleData(raffleData)
+
+            // 发送临时消息，5秒后撤回
+            try {
+              const guildId = activity.guildId || session.guildId
+              if (guildId) {
+                const sentMessages = await session.bot.sendMessage(
+                  guildId,
+                  `✅ ${activity.name} 参与成功！\n🆔 活动ID: ${activityId}\n👥 当前参与人数：${activity.participants.length}`
+                )
+
+                // 5秒后撤回消息
+                setTimeout(async () => {
+                  try {
+                    if (sentMessages && sentMessages.length > 0) {
+                      await session.bot.deleteMessage(guildId, sentMessages[0])
+                    }
+                  } catch (error) {
+                    if (config.debugMode) {
+                      logger.warn(`撤回表情参与消息失败: ${error}`)
+                    }
+                  }
+                }, 5000)
+              }
+            } catch (error) {
+              if (config.debugMode) {
+                logger.error(`发送表情参与消息失败: ${error}`)
+              }
+            }
+
+            if (config.debugMode) {
+              logger.info(`用户 ${username} (${likeUserId}) 通过表情回应参与了抽奖活动 ${activityId}`)
+            }
+          }
+
+          break
+        }
+      }
+    } catch (error) {
+      if (config.debugMode) {
+        logger.error(`处理表情回应参与时出错: ${error}`)
+      }
+    }
+  })
+
   // 插件卸载时清理定时器
   ctx.on('dispose', () => {
     raffleTimerManager.clearAllTimers()
