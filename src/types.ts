@@ -5,6 +5,10 @@ declare module 'koishi' {
   interface Session {
     onebot?: any
   }
+
+  interface Events {
+    'notice'(session: Session): void
+  }
 }
 
 // ===== 配置接口 =====

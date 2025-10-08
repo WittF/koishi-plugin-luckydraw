@@ -128,8 +128,8 @@ export function apply(ctx: Context, config: Config) {
   })
 
   // 监听表情回应事件，处理抽奖参与
-  ctx.on('internal/session', async (session) => {
-    if (session.type !== 'notice' || session.subtype !== 'group-msg-emoji-like') {
+  ctx.on('notice', async (session) => {
+    if (session.subtype !== 'group-msg-emoji-like') {
       return
     }
 

@@ -31,6 +31,8 @@ export function registerRaffleCommands(
     .action(async ({ session }, targetGuildId?: string) => {
       const userId = session.userId
 
+      logger.info(`[抽奖创建] 用户 ${userId} 开始创建抽奖活动`)
+
       // 验证管理员身份
       if (!checkAdmin(userId, config.adminQQ)) {
         await sendMessage(session, '❌ 你没有权限创建抽奖活动，只有管理员可以操作！')
@@ -39,6 +41,8 @@ export function registerRaffleCommands(
 
       // 确定目标群号：如果提供了参数则使用参数，否则使用当前群号
       const guildId = targetGuildId || session.guildId
+
+      logger.info(`[抽奖创建] 目标群号: ${guildId}, 当前会话群号: ${session.guildId}`)
 
       // 如果没有提供群号也不在群聊中，则报错
       if (!guildId) {
@@ -146,10 +150,8 @@ export function registerRaffleCommands(
           const promptMessages = await sendMessage(session, '🔑 设置要求表情\n使用特定表情回应这条消息以设置（60秒内有效）')
           const promptMessageId = Array.isArray(promptMessages) && promptMessages.length > 0 ? promptMessages[0] : null
 
-          if (config.debugMode) {
-            logger.info(`发送提示消息，返回的消息ID: ${promptMessageId}`)
-            logger.info(`promptMessages:`, promptMessages)
-          }
+          logger.info(`[抽奖创建] 发送提示消息，返回: ${JSON.stringify(promptMessages)}`)
+          logger.info(`[抽奖创建] 提取消息ID: ${promptMessageId}`)
 
           if (!promptMessageId) {
             await sendMessage(session, '❌ 无法获取消息ID，请重新创建。')
@@ -157,27 +159,26 @@ export function registerRaffleCommands(
           }
 
           // 监听表情回应事件
+          logger.info(`[抽奖创建] 开始监听表情回应，等待消息ID: ${promptMessageId}`)
+
           const emojiPromise = new Promise<string | null>((resolve) => {
             const timeout = setTimeout(() => {
+              logger.info(`[抽奖创建] 60秒超时，未收到表情回应`)
               dispose()
               resolve(null)
             }, 60000)
 
-            const dispose = ctx.on('internal/session', (emojiSession) => {
-              if (config.debugMode) {
-                logger.info(`[创建流程] 收到 internal/session 事件: type=${emojiSession.type}, subtype=${emojiSession.subtype}`)
-              }
+            const dispose = ctx.on('notice', (emojiSession) => {
+              logger.info(`[抽奖创建] 收到 notice 事件: subtype=${emojiSession.subtype}`)
 
-              if (emojiSession.type !== 'notice' || emojiSession.subtype !== 'group-msg-emoji-like') {
+              if (emojiSession.subtype !== 'group-msg-emoji-like') {
                 return
               }
 
               const data = emojiSession.onebot as any
 
-              if (config.debugMode) {
-                logger.info(`[创建流程] 收到表情回应事件: message_id=${data.message_id}, promptMessageId=${promptMessageId}`)
-                logger.info(`[创建流程] 表情回应数据:`, JSON.stringify(data))
-              }
+              logger.info(`[抽奖创建] 收到表情回应: message_id=${data.message_id}, 期望: ${promptMessageId}`)
+              logger.info(`[抽奖创建] 完整数据: ${JSON.stringify(data)}`)
 
               // 检查：回应消息ID是否匹配（转为字符串比较）
               if (data.message_id?.toString() !== promptMessageId?.toString()) {
