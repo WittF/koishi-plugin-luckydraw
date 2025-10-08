@@ -48,7 +48,7 @@ export function registerRaffleCommands(
 
       try {
         // 步骤1: 输入活动名称
-        await sendMessage(session, '📝 请输入抽奖活动名称（发送"取消"可退出）：')
+        await sendMessage(session, '📝 请输入抽奖活动名称\n发送"取消"可退出')
         const activityName = await session.prompt(60000)
         if (!activityName) {
           await sendMessage(session, '⏱️ 输入超时，已取消创建。')
@@ -60,7 +60,7 @@ export function registerRaffleCommands(
         }
 
         // 步骤2: 输入开奖时间
-        await sendMessage(session, '⏰ 请输入开奖时间（发送"取消"可退出）\n支持格式：\n• 相对时间: 1h（1小时后）、30m（30分钟后）、1d（1天后）\n• 今天时间: 18:00\n• 绝对时间: 2024-12-31 18:00')
+        await sendMessage(session, '⏰ 请输入开奖时间\n支持格式：\n• 相对时间: 1h（1小时后）、30m（30分钟后）、1d（1天后）\n• 今天时间: 18:00\n• 绝对时间: 2024-12-31 18:00\n\n发送"取消"可退出')
         const timeInput = await session.prompt(60000)
         if (!timeInput) {
           await sendMessage(session, '⏱️ 输入超时，已取消创建。')
@@ -79,7 +79,7 @@ export function registerRaffleCommands(
         }
 
         // 步骤3: 输入奖品信息
-        await sendMessage(session, '🎁 请输入奖品信息（发送"取消"可退出）\n格式：奖品名称|奖品描述|数量\n例如：一等奖|iPhone 15 Pro|1\n支持多行输入，每行一个奖品')
+        await sendMessage(session, '🎁 请输入奖品信息\n格式：奖品名称|奖品描述|数量\n例如：一等奖|iPhone 15 Pro|1\n支持多行输入，每行一个奖品\n\n发送"取消"可退出')
         const prizesInput = await session.prompt(120000)
         if (!prizesInput) {
           await sendMessage(session, '⏱️ 输入超时，已取消创建。')
@@ -118,7 +118,7 @@ export function registerRaffleCommands(
         }
 
         // 步骤4: 询问是否设置口令
-        await sendMessage(session, '🔑 设置参与口令？\n发送口令文字，或发送"跳过"改为设置回应特定表情，发送"取消"可退出')
+        await sendMessage(session, '🔑 设置参与口令？\n发送口令文字，或发送"跳过"改为设置回应特定表情\n\n发送"取消"可退出')
         const keywordInput = await session.prompt(60000)
         if (!keywordInput) {
           await sendMessage(session, '⏱️ 输入超时，已取消创建。')
@@ -137,7 +137,13 @@ export function registerRaffleCommands(
           keyword = keywordInput.trim()
         } else {
           // 步骤5: 用户跳过口令，设置表情
-          const promptMessages = await sendMessage(session, '🔑 设置要求表情？\n使用特定表情回应这条消息以设置（60秒内有效）')
+          // 检查是否在群聊中（表情回应功能仅在群聊可用）
+          if (!session.guildId) {
+            await sendMessage(session, '❌ 表情回应功能仅在群聊中可用，请在群聊中创建抽奖或使用口令参与方式。')
+            return
+          }
+
+          const promptMessages = await sendMessage(session, '🔑 设置要求表情\n使用特定表情回应这条消息以设置（60秒内有效）')
           const promptMessageId = Array.isArray(promptMessages) && promptMessages.length > 0 ? promptMessages[0] : null
 
           if (!promptMessageId) {
