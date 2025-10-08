@@ -27,8 +27,8 @@ export function registerRaffleCommands(
   logger: Logger
 ) {
   // `raffle.create` 命令：交互式创建抽奖活动
-  ctx.command('raffle.create', '创建抽奖活动（交互式）')
-    .action(async ({ session }) => {
+  ctx.command('raffle.create [targetGuildId:string]', '创建抽奖活动（交互式）')
+    .action(async ({ session }, targetGuildId?: string) => {
       const userId = session.userId
 
       // 验证管理员身份
@@ -37,9 +37,12 @@ export function registerRaffleCommands(
         return
       }
 
-      // 检查是否在群聊中
-      if (!session.guildId) {
-        await sendMessage(session, '❌ 抽奖活动只能在群聊中创建！')
+      // 确定目标群号：如果提供了参数则使用参数，否则使用当前群号
+      const guildId = targetGuildId || session.guildId
+
+      // 如果没有提供群号也不在群聊中，则报错
+      if (!guildId) {
+        await sendMessage(session, '❌ 请在群聊中使用该命令，或指定目标群号！')
         return
       }
 
@@ -140,7 +143,7 @@ export function registerRaffleCommands(
         const activity = {
           id: activityId,
           name: activityName,
-          guildId: session.guildId,
+          guildId: guildId,
           prizes,
           participants: [],
           drawTime,
@@ -179,7 +182,18 @@ export function registerRaffleCommands(
           confirmMsg += `raffle.join ${activityId} 参与抽奖`
         }
 
-        await sendMessage(session, confirmMsg)
+        // 如果指定了目标群号，发送到目标群；否则发送到当前会话
+        if (targetGuildId) {
+          try {
+            await session.bot.sendMessage(targetGuildId, confirmMsg)
+            await sendMessage(session, `✅ 抽奖活动已创建并发送到群 ${targetGuildId}`)
+          } catch (error) {
+            logger.error(`发送抽奖信息到群 ${targetGuildId} 失败: ${error}`)
+            await sendMessage(session, `✅ 抽奖活动已创建，但发送到群 ${targetGuildId} 失败\n\n${confirmMsg}`)
+          }
+        } else {
+          await sendMessage(session, confirmMsg)
+        }
 
         if (config.debugMode) {
           logger.info(`管理员 ${userId} 创建了抽奖活动: ${activityName} (${activityId})`)
