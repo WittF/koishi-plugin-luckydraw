@@ -118,3 +118,14 @@ export async function sendTemporaryJoinMessage(
     }
   }
 }
+
+// 删除消息的辅助函数
+export async function deleteMessage(session: Session, messageId: string): Promise<void> {
+  try {
+    if (messageId && session.channelId) {
+      await session.bot.deleteMessage(session.channelId, messageId)
+    }
+  } catch (error) {
+    // 静默处理删除失败
+  }
+}

@@ -2,7 +2,7 @@ import { Context, Logger, Session } from 'koishi'
 import { Config, RafflePrize, RaffleActivity } from '../types'
 import { RaffleHandler } from './handler'
 import { RaffleTimerManager } from './timer'
-import { sendMessage, generateActivityId, checkAdmin, formatTime, parseTimeString } from '../utils'
+import { sendMessage, generateActivityId, checkAdmin, formatTime, parseTimeString, deleteMessage } from '../utils'
 
 // 辅助函数：检查是否为 None 奖品（谢谢参与）
 function isNonePrize(prize: RafflePrize): boolean {
@@ -52,8 +52,11 @@ export function registerRaffleCommands(
 
       try {
         // 步骤1: 输入活动名称
-        await sendMessage(session, '📝 请输入抽奖活动名称\n发送"取消"可退出')
+        const step1Messages = await sendMessage(session, '📝 请输入抽奖活动名称\n发送"取消"可退出')
+        const step1MessageId = Array.isArray(step1Messages) && step1Messages.length > 0 ? step1Messages[0] : null
         const activityName = await session.prompt(60000)
+        if (step1MessageId) await deleteMessage(session, step1MessageId)
+
         if (!activityName) {
           await sendMessage(session, '⏱️ 输入超时，已取消创建。')
           return
@@ -64,8 +67,11 @@ export function registerRaffleCommands(
         }
 
         // 步骤2: 输入开奖时间
-        await sendMessage(session, '⏰ 请输入开奖时间\n支持格式：\n• 相对时间: 1h（1小时后）、30m（30分钟后）、1d（1天后）\n• 今天时间: 18:00\n• 绝对时间: 2024-12-31 18:00\n\n发送"取消"可退出')
+        const step2Messages = await sendMessage(session, '⏰ 请输入开奖时间\n支持格式：\n• 相对时间: 1h（1小时后）、30m（30分钟后）、1d（1天后）\n• 今天时间: 18:00\n• 绝对时间: 2024-12-31 18:00\n\n发送"取消"可退出')
+        const step2MessageId = Array.isArray(step2Messages) && step2Messages.length > 0 ? step2Messages[0] : null
         const timeInput = await session.prompt(60000)
+        if (step2MessageId) await deleteMessage(session, step2MessageId)
+
         if (!timeInput) {
           await sendMessage(session, '⏱️ 输入超时，已取消创建。')
           return
@@ -83,8 +89,11 @@ export function registerRaffleCommands(
         }
 
         // 步骤3: 输入奖品信息
-        await sendMessage(session, '🎁 请输入奖品信息\n格式：奖品名称|奖品描述|数量\n例如：一等奖|iPhone 15 Pro|1\n支持多行输入，每行一个奖品\n\n发送"取消"可退出')
+        const step3Messages = await sendMessage(session, '🎁 请输入奖品信息\n格式：奖品名称|奖品描述|数量\n例如：一等奖|iPhone 15 Pro|1\n支持多行输入，每行一个奖品\n\n发送"取消"可退出')
+        const step3MessageId = Array.isArray(step3Messages) && step3Messages.length > 0 ? step3Messages[0] : null
         const prizesInput = await session.prompt(120000)
+        if (step3MessageId) await deleteMessage(session, step3MessageId)
+
         if (!prizesInput) {
           await sendMessage(session, '⏱️ 输入超时，已取消创建。')
           return
@@ -122,8 +131,11 @@ export function registerRaffleCommands(
         }
 
         // 步骤4: 询问是否设置口令
-        await sendMessage(session, '🔑 设置参与口令？\n发送口令文字，或发送"跳过"改为设置回应特定表情\n\n发送"取消"可退出')
+        const step4Messages = await sendMessage(session, '🔑 设置参与口令？\n发送口令文字，或发送"跳过"改为设置回应特定表情\n\n发送"取消"可退出')
+        const step4MessageId = Array.isArray(step4Messages) && step4Messages.length > 0 ? step4Messages[0] : null
         const keywordInput = await session.prompt(60000)
+        if (step4MessageId) await deleteMessage(session, step4MessageId)
+
         if (!keywordInput) {
           await sendMessage(session, '⏱️ 输入超时，已取消创建。')
           return
@@ -212,22 +224,15 @@ export function registerRaffleCommands(
 
           emojiId = await emojiPromise
 
+          // 撤回提示消息
+          if (promptMessageId) await deleteMessage(session, promptMessageId)
+
           if (!emojiId) {
             await sendMessage(session, '⏱️ 未在60秒内收到有效的表情回应，已取消创建。')
             return
           }
 
-          // 使用 bot.internal API 发送带表情的确认消息
-          try {
-            const bot = session.bot as any
-            if (bot.internal?.setMsgEmojiLike) {
-              await sendMessage(session, `✅ 已设置参与表情（表情ID: ${emojiId}）`)
-            } else {
-              await sendMessage(session, `✅ 已设置参与表情（表情ID: ${emojiId}）`)
-            }
-          } catch {
-            await sendMessage(session, `✅ 已设置参与表情（表情ID: ${emojiId}）`)
-          }
+          logger.info(`✅ 已设置参与表情（表情ID: ${emojiId}）`)
         }
 
         // 所有步骤完成后，重新计算开奖时间（确保相对时间从现在开始计算）
@@ -268,7 +273,6 @@ export function registerRaffleCommands(
         announceMsg += `🆔 活动ID: ${activityId}\n`
         announceMsg += `📊 状态: 进行中\n`
         announceMsg += `⏰ 开奖时间: ${formatTime(drawTime)}\n`
-        announceMsg += `👥 参与人数: 0\n`
         announceMsg += `🎁 奖品总数: ${totalPrizes} 个\n\n`
         announceMsg += `📋 奖品列表:\n`
         realPrizes.forEach((p, idx) => {
