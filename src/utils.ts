@@ -107,7 +107,7 @@ export async function sendTemporaryJoinMessage(
     // 添加@用户
     if (userId) {
       messageElements.push(h.at(userId))
-      messageElements.push(' ')
+      messageElements.push('\n')
     }
 
     // 添加消息内容
