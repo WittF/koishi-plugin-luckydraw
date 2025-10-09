@@ -110,7 +110,8 @@ export function apply(ctx: Context, config: Config) {
             activity.participants.length,
             config.debugMode,
             logger,
-            session.userId
+            session.userId,
+            activity.announceMessageId
           )
 
           if (config.debugMode) {
@@ -210,7 +211,8 @@ export function apply(ctx: Context, config: Config) {
               activity.participants.length,
               config.debugMode,
               logger,
-              userId
+              userId,
+              activity.announceMessageId
             )
           }
 
