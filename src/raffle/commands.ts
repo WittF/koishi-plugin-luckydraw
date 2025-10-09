@@ -282,7 +282,7 @@ export function registerRaffleCommands(
         if (keyword) {
           announceMsg += `发送口令"${keyword}"`
         } else if (emojiId) {
-          announceMsg += `使用指定表情回应本消息`
+          announceMsg += `使用表情回应本消息（参照 Bot 已添加的表情）`
         }
 
         // 发送活动播报到目标群

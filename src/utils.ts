@@ -92,13 +92,15 @@ export async function sendTemporaryJoinMessage(
   activityId: string,
   participantCount: number,
   debugMode: boolean,
-  logger: any
+  logger: any,
+  userId?: string
 ): Promise<void> {
   try {
-    const sentMessages = await bot.sendMessage(
-      guildId,
-      `✅ ${activityName} 参与成功！\n🆔 活动ID: ${activityId}\n👥 当前参与人数：${participantCount}`
-    )
+    const messageContent = userId
+      ? [h.at(userId), ` ✅ ${activityName} 参与成功！\n👥 当前参与人数：${participantCount}`]
+      : `✅ ${activityName} 参与成功！\n👥 当前参与人数：${participantCount}`
+
+    const sentMessages = await bot.sendMessage(guildId, messageContent)
 
     // 5秒后撤回消息
     setTimeout(async () => {
