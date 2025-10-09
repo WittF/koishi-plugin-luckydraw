@@ -430,15 +430,33 @@ export function registerRaffleCommands(
     })
 
   // `raffle.info <活动ID>` 命令：查看抽奖详情
-  ctx.command('raffle.info <activityId:string>', '查看抽奖活动详情')
-    .action(async ({ session }, activityId: string) => {
-      if (!activityId) {
-        await sendMessage(session, '❌ 请提供抽奖活动ID！')
-        return
-      }
-
+  ctx.command('raffle.info [activityId:string]', '查看抽奖活动详情')
+    .action(async ({ session }, activityId?: string) => {
       try {
         const raffleData = await handler.loadRaffleData()
+
+        // 如果没有提供活动ID，显示本群最近的进行中抽奖
+        if (!activityId) {
+          const guildId = session.guildId
+          if (!guildId) {
+            await sendMessage(session, '❌ 请在群聊中使用该命令，或提供活动ID')
+            return
+          }
+
+          // 查找本群进行中的活动，按创建时间倒序
+          const activities = Object.values(raffleData)
+            .filter(a => a.status === 'active' && a.guildId === guildId)
+            .sort((a, b) => b.createdAt - a.createdAt)
+
+          if (activities.length === 0) {
+            await sendMessage(session, '📭 本群当前没有进行中的抽奖活动')
+            return
+          }
+
+          // 显示最新的活动
+          activityId = activities[0].id
+        }
+
         const activity = raffleData[activityId]
 
         if (!activity) {
