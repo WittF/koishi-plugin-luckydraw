@@ -268,7 +268,7 @@ export function registerRaffleCommands(
         // 构建活动播报消息
         const realPrizes = filterRealPrizes(prizes)
         const totalPrizes = countRealPrizes(prizes)
-        let announceMsg = `🎊 抽奖活动\n\n`
+        let announceMsg = `🎊 抽奖活动发布\n\n`
         announceMsg += `📝 活动名称: ${activityName}\n`
         announceMsg += `🆔 活动ID: ${activityId}\n`
         announceMsg += `📊 状态: 进行中\n`
@@ -282,7 +282,7 @@ export function registerRaffleCommands(
         if (keyword) {
           announceMsg += `发送口令"${keyword}"`
         } else if (emojiId) {
-          announceMsg += `使用表情回应本消息（参照 Bot 已添加的表情）`
+          announceMsg += `使用指定表情回应本消息`
         }
 
         // 发送活动播报到目标群
