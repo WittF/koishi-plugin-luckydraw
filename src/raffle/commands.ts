@@ -1,5 +1,5 @@
 import { Context, Logger, Session } from 'koishi'
-import { Config, RafflePrize, RaffleActivity } from '../types'
+import { Config, RafflePrize } from '../types'
 import { RaffleHandler } from './handler'
 import { RaffleTimerManager } from './timer'
 import { sendMessage, generateActivityId, checkAdmin, formatTime, parseTimeString, deleteMessage } from '../utils'
@@ -104,7 +104,7 @@ export function registerRaffleCommands(
         }
 
         // 解析奖品信息
-        const prizes: RafflePrize[] = []
+        const prizes: Array<{ name: string; description: string; count: number }> = []
         const lines = prizesInput.split('\n').map(l => l.trim()).filter(l => l.length > 0)
 
         for (const line of lines) {
@@ -242,32 +242,31 @@ export function registerRaffleCommands(
           return
         }
 
-        // 创建抽奖活动
+        // 创建抽奖活动（使用新的数据库API）
         const activityId = generateActivityId()
-        const activity: RaffleActivity = {
+        const activity = await handler.createActivity({
           id: activityId,
           name: activityName,
           guildId: guildId,
-          prizes,
-          participants: [],
           drawTime,
-          status: 'active',
           createdBy: userId,
-          createdAt: Date.now(),
-          keyword,
-          emojiId
-        }
+          keyword: keyword || '',
+          emojiId: emojiId || '',
+          announceMessageId: ''
+        })
 
-        const raffleData = await handler.loadRaffleData()
-        raffleData[activityId] = activity
-        await handler.saveRaffleData(raffleData)
+        // 添加奖品
+        await handler.addPrizes(activityId, prizes)
+
+        // 更新活动状态为 active
+        await handler.updateActivityStatus(activityId, 'active')
 
         // 设置定时开奖
-        timerManager.scheduleRaffleDraw(activityId, activity)
+        timerManager.scheduleRaffleDraw(guildId, activityId, drawTime, activityName)
 
         // 构建活动播报消息
-        const realPrizes = filterRealPrizes(prizes)
-        const totalPrizes = countRealPrizes(prizes)
+        const realPrizes = prizes.filter(p => !isNonePrize(p as RafflePrize))
+        const totalPrizes = realPrizes.reduce((sum, p) => sum + p.count, 0)
         let announceMsg = `🎊 抽奖活动发布\n\n`
         announceMsg += `📝 活动名称: ${activityName}\n`
         announceMsg += `🆔 活动ID: ${activityId}\n`
@@ -295,9 +294,7 @@ export function registerRaffleCommands(
 
           // 保存播报消息ID
           if (announceMessageId) {
-            activity.announceMessageId = announceMessageId
-            raffleData[activityId] = activity
-            await handler.saveRaffleData(raffleData)
+            await handler.updateAnnounceMessageId(activityId, announceMessageId)
             logger.info(`[抽奖创建] 已保存播报消息ID到活动 ${activityId}`)
 
             // 如果使用表情参与，bot给播报消息添加表情回应以展示参与表情
@@ -347,13 +344,14 @@ export function registerRaffleCommands(
       }
 
       try {
-        const raffleData = await handler.loadRaffleData()
-        const activity = raffleData[activityId]
+        const activityData = await handler.getActivity(activityId)
 
-        if (!activity) {
+        if (!activityData) {
           await sendMessage(session, `❌ 找不到抽奖活动 ${activityId}`)
           return
         }
+
+        const { activity } = activityData
 
         if (activity.status !== 'active') {
           await sendMessage(session, `❌ 该抽奖活动已${activity.status === 'drawn' ? '结束' : '取消'}`)
@@ -367,23 +365,22 @@ export function registerRaffleCommands(
         }
 
         // 检查是否已经参与
-        const alreadyJoined = activity.participants.some(p => p.userId === session.userId)
+        const alreadyJoined = await handler.hasUserJoined(activityId, session.userId)
         if (alreadyJoined) {
           await sendMessage(session, '❌ 你已经参与过该抽奖活动了！')
           return
         }
 
         // 添加参与者
-        activity.participants.push({
-          userId: session.userId,
-          username: session.username || '未知用户',
-          joinedAt: Date.now()
-        })
+        const success = await handler.addParticipant(activityId, session.userId, session.username || '未知用户')
+        if (!success) {
+          await sendMessage(session, '❌ 参与失败，请稍后再试')
+          return
+        }
 
-        raffleData[activityId] = activity
-        await handler.saveRaffleData(raffleData)
+        const participantCount = await handler.getParticipantCount(activityId)
 
-        await sendMessage(session, `✅ ${activity.name} 参与成功！\n🆔 活动ID: ${activityId}\n👥 当前参与人数：${activity.participants.length}`)
+        await sendMessage(session, `✅ ${activity.name} 参与成功！\n🆔 活动ID: ${activityId}\n👥 当前参与人数：${participantCount}`)
 
         if (config.debugMode) {
           logger.info(`用户 ${session.username} (${session.userId}) 参与了抽奖活动 ${activityId}`)
@@ -399,11 +396,13 @@ export function registerRaffleCommands(
   ctx.command('raffle.list', '查看进行中的抽奖活动')
     .action(async ({ session }) => {
       try {
-        const raffleData = await handler.loadRaffleData()
-        const activities = Object.values(raffleData).filter(a =>
-          a.status === 'active' &&
-          (!a.guildId || a.guildId === session.guildId)
-        )
+        const guildId = session.guildId
+        if (!guildId) {
+          await sendMessage(session, '❌ 请在群聊中使用该命令')
+          return
+        }
+
+        const activities = await handler.getGuildActivities(guildId, 'active')
 
         if (activities.length === 0) {
           await sendMessage(session, '📭 当前没有进行中的抽奖活动')
@@ -411,14 +410,20 @@ export function registerRaffleCommands(
         }
 
         let message = `📋 进行中的抽奖活动（${activities.length}个）:\n\n`
-        activities.forEach((activity, idx) => {
-          const totalPrizes = countRealPrizes(activity.prizes)
-          message += `${idx + 1}. ${activity.name}\n`
+
+        for (const activity of activities) {
+          const activityData = await handler.getActivity(activity.id)
+          if (!activityData) continue
+
+          const { prizes, participants } = activityData
+          const totalPrizes = countRealPrizes(prizes)
+
+          message += `${activities.indexOf(activity) + 1}. ${activity.name}\n`
           message += `   🆔 ID: ${activity.id}\n`
           message += `   ⏰ 开奖: ${formatTime(activity.drawTime)}\n`
           message += `   🎁 奖品: ${totalPrizes}个\n`
-          message += `   👥 参与: ${activity.participants.length}人\n\n`
-        })
+          message += `   👥 参与: ${participants.length}人\n\n`
+        }
 
         message += `💡 使用 raffle.join <活动ID> 参与抽奖`
         await sendMessage(session, message)
@@ -433,8 +438,6 @@ export function registerRaffleCommands(
   ctx.command('raffle.info [activityId:string]', '查看抽奖活动详情')
     .action(async ({ session }, activityId?: string) => {
       try {
-        const raffleData = await handler.loadRaffleData()
-
         // 如果没有提供活动ID，显示本群最近的进行中抽奖
         if (!activityId) {
           const guildId = session.guildId
@@ -444,34 +447,35 @@ export function registerRaffleCommands(
           }
 
           // 查找本群进行中的活动，按创建时间倒序
-          const activities = Object.values(raffleData)
-            .filter(a => a.status === 'active' && a.guildId === guildId)
-            .sort((a, b) => b.createdAt - a.createdAt)
+          const activities = await handler.getGuildActivities(guildId, 'active')
+          const sortedActivities = activities.sort((a, b) => b.createdAt - a.createdAt)
 
-          if (activities.length === 0) {
+          if (sortedActivities.length === 0) {
             await sendMessage(session, '📭 本群当前没有进行中的抽奖活动')
             return
           }
 
           // 显示最新的活动
-          activityId = activities[0].id
+          activityId = sortedActivities[0].id
         }
 
-        const activity = raffleData[activityId]
+        const activityData = await handler.getActivity(activityId)
 
-        if (!activity) {
+        if (!activityData) {
           await sendMessage(session, `❌ 找不到抽奖活动 ${activityId}`)
           return
         }
 
-        const realPrizes = filterRealPrizes(activity.prizes)
-        const totalPrizes = countRealPrizes(activity.prizes)
+        const { activity, prizes, participants } = activityData
+
+        const realPrizes = filterRealPrizes(prizes)
+        const totalPrizes = countRealPrizes(prizes)
         let message = `🎊 抽奖活动详情\n\n`
         message += `📝 活动名称: ${activity.name}\n`
         message += `🆔 活动ID: ${activity.id}\n`
         message += `📊 状态: ${activity.status === 'active' ? '进行中' : activity.status === 'drawn' ? '已开奖' : '已取消'}\n`
         message += `⏰ 开奖时间: ${formatTime(activity.drawTime)}\n`
-        message += `👥 参与人数: ${activity.participants.length}\n`
+        message += `👥 参与人数: ${participants.length}\n`
         message += `🎁 奖品总数: ${totalPrizes} 个\n\n`
 
         message += `📋 奖品列表:\n`
@@ -479,13 +483,18 @@ export function registerRaffleCommands(
           message += `${idx + 1}. ${p.name} - ${p.description} (${p.count}个)\n`
         })
 
-        if (activity.status === 'drawn' && activity.winners && activity.winners.length > 0) {
-          // 只显示真正中奖的用户
-          const realWinners = activity.winners.filter(w => w.prize.toLowerCase() !== 'none - none')
+        if (activity.status === 'drawn') {
+          const winners = await handler.getWinners(activityId)
+          // 只显示真正中奖的用户（过滤掉 None 奖品）
+          const realWinners = winners.filter(w => {
+            const prizeName = w.prizeName.toLowerCase()
+            return prizeName !== 'none'
+          })
+
           if (realWinners.length > 0) {
             message += `\n🏆 中奖名单:\n`
             realWinners.forEach((w, idx) => {
-              message += `${idx + 1}. ${w.username}\n   奖品: ${w.prize}\n`
+              message += `${idx + 1}. ${w.username}\n   奖品: ${w.prizeName}\n`
             })
           } else {
             message += `\n💨 本次抽奖无人中奖`
@@ -522,13 +531,14 @@ export function registerRaffleCommands(
       }
 
       try {
-        const raffleData = await handler.loadRaffleData()
-        const activity = raffleData[activityId]
+        const activityData = await handler.getActivity(activityId)
 
-        if (!activity) {
+        if (!activityData) {
           await sendMessage(session, `❌ 找不到抽奖活动 ${activityId}`)
           return
         }
+
+        const { activity } = activityData
 
         if (activity.status !== 'active') {
           await sendMessage(session, `❌ 该抽奖活动已${activity.status === 'drawn' ? '开奖' : '取消'}，无法取消`)
@@ -536,12 +546,10 @@ export function registerRaffleCommands(
         }
 
         // 取消定时器
-        timerManager.cancelTimer(activityId)
+        timerManager.cancelTimer(activity.guildId, activityId)
 
         // 更新状态
-        activity.status = 'cancelled'
-        raffleData[activityId] = activity
-        await handler.saveRaffleData(raffleData)
+        await handler.cancelActivity(activityId)
 
         await sendMessage(session, `✅ 抽奖活动 "${activity.name}" 已取消`)
 

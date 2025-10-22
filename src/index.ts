@@ -1,6 +1,4 @@
 import { Context, Logger, h } from 'koishi'
-import * as path from 'path'
-import * as fs from 'fs/promises'
 import { Config, schema } from './types'
 import { LotteryHandler } from './lottery/handler'
 import { registerLotteryCommands } from './lottery/commands'
@@ -15,30 +13,17 @@ export { Config, schema } from './types'
 export function apply(ctx: Context, config: Config) {
   const logger = new Logger('lucky-draw')
 
-  // 1. 构建保存文件的目录：ctx.baseDir/data/luckydraw
-  const root = path.join(ctx.baseDir, 'data', 'luckydraw')
-
-  // 2. 如果目录不存在则递归创建
-  fs.mkdir(root, { recursive: true }).catch((error) => {
-    logger.error(`创建 luckydraw 数据目录失败: ${error.message}`)
-  })
-
-  // 3. 定义文件路径
-  const lotteryPoolFilePath = path.join(root, 'lottery_pools.json')
-  const userDrawEntriesFilePath = path.join(root, 'user_draw_entries.json')
-  const raffleDataFilePath = path.join(root, 'raffle_activities.json')
-
   // 初始化处理器
-  const lotteryHandler = new LotteryHandler(lotteryPoolFilePath, userDrawEntriesFilePath)
-  const raffleHandler = new RaffleHandler(raffleDataFilePath)
+  const lotteryHandler = new LotteryHandler(ctx)
+  const raffleHandler = new RaffleHandler(ctx)
   const raffleTimerManager = new RaffleTimerManager(ctx, raffleHandler, logger)
 
-  // 初始化文件
-  lotteryHandler.initializeFiles().catch((error) => {
-    logger.error(`初始化抽签文件时出错: ${error.message}`)
+  // 初始化数据库表
+  lotteryHandler.initializeTables().catch((error) => {
+    logger.error(`初始化抽签表时出错: ${error.message}`)
   })
-  raffleHandler.initializeFiles().catch((error) => {
-    logger.error(`初始化抽奖文件时出错: ${error.message}`)
+  raffleHandler.initializeTables().catch((error) => {
+    logger.error(`初始化抽奖表时出错: ${error.message}`)
   })
 
   // 初始化抽奖定时器
@@ -75,47 +60,44 @@ export function apply(ctx: Context, config: Config) {
     }
 
     try {
-      const raffleData = await raffleHandler.loadRaffleData()
-
       // 查找匹配口令的活动
-      for (const [activityId, activity] of Object.entries(raffleData)) {
-        if (
-          activity.keyword &&
-          activity.keyword === messageContent &&
-          activity.status === 'active' &&
-          activity.guildId === session.guildId
-        ) {
+      const activities = await raffleHandler.getGuildActivities(session.guildId, 'active')
+
+      for (const activity of activities) {
+        if (activity.keyword && activity.keyword === messageContent) {
           // 检查是否已经参与
-          const alreadyJoined = activity.participants.some(p => p.userId === session.userId)
+          const alreadyJoined = await raffleHandler.hasUserJoined(activity.id, session.userId)
           if (alreadyJoined) {
             return // 静默处理，不提示
           }
 
           // 添加参与者
-          activity.participants.push({
-            userId: session.userId,
-            username: session.username || '未知用户',
-            joinedAt: Date.now()
-          })
-
-          raffleData[activityId] = activity
-          await raffleHandler.saveRaffleData(raffleData)
-
-          // 发送临时消息，5秒后撤回
-          await sendTemporaryJoinMessage(
-            session.bot,
-            session.guildId,
-            activity.name,
-            activityId,
-            activity.participants.length,
-            config.debugMode,
-            logger,
+          const added = await raffleHandler.addParticipant(
+            activity.id,
             session.userId,
-            activity.announceMessageId
+            session.username || '未知用户'
           )
 
-          if (config.debugMode) {
-            logger.info(`用户 ${session.username} (${session.userId}) 通过口令"${activity.keyword}"参与了抽奖活动 ${activityId}`)
+          if (added) {
+            // 获取当前参与人数
+            const participantCount = await raffleHandler.getParticipantCount(activity.id)
+
+            // 发送临时消息，5秒后撤回
+            await sendTemporaryJoinMessage(
+              session.bot,
+              session.guildId,
+              activity.name,
+              activity.id,
+              participantCount,
+              config.debugMode,
+              logger,
+              session.userId,
+              activity.announceMessageId
+            )
+
+            if (config.debugMode) {
+              logger.info(`用户 ${session.username} (${session.userId}) 通过口令"${activity.keyword}"参与了抽奖活动 ${activity.id}`)
+            }
           }
 
           return
@@ -149,21 +131,24 @@ export function apply(ctx: Context, config: Config) {
     }
 
     try {
-      const raffleData = await raffleHandler.loadRaffleData()
-      const activities = Object.entries(raffleData)
+      // 获取所有进行中的活动
+      const guildId = session.guildId
+      if (!guildId) return
+
+      const activities = await raffleHandler.getGuildActivities(guildId, 'active')
 
       logger.info(`[抽奖参与] 当前活动总数: ${activities.length}`)
 
       // 查找匹配的活动（消息ID匹配）
-      for (const [activityId, activity] of activities) {
-        logger.info(`[抽奖参与] 检查活动 ${activityId}: announceMessageId=${activity.announceMessageId} (类型: ${typeof activity.announceMessageId}), messageId=${messageId} (类型: ${typeof messageId}), status=${activity.status}, emojiId=${activity.emojiId}`)
+      for (const activity of activities) {
+        logger.info(`[抽奖参与] 检查活动 ${activity.id}: announceMessageId=${activity.announceMessageId} (类型: ${typeof activity.announceMessageId}), messageId=${messageId} (类型: ${typeof messageId}), status=${activity.status}, emojiId=${activity.emojiId}`)
 
         if (
           activity.announceMessageId?.toString() === messageId?.toString() &&
           activity.status === 'active' &&
           activity.emojiId
         ) {
-          logger.info(`[抽奖参与] 找到匹配活动: ${activityId}, 要求表情: ${activity.emojiId}`)
+          logger.info(`[抽奖参与] 找到匹配活动: ${activity.id}, 要求表情: ${activity.emojiId}`)
 
           // 检查表情回应中是否包含活动要求的表情
           const hasRequiredEmoji = likes.some(like => like.emoji_id === activity.emojiId)
@@ -175,8 +160,9 @@ export function apply(ctx: Context, config: Config) {
           }
 
           // 检查是否已经参与
-          const alreadyJoined = activity.participants.some(p => p.userId === userId)
-          logger.info(`[抽奖参与] 用户参与检查: userId=${userId}, 已参与=${alreadyJoined}, 当前参与人数=${activity.participants.length}`)
+          const alreadyJoined = await raffleHandler.hasUserJoined(activity.id, userId)
+          const participantCount = await raffleHandler.getParticipantCount(activity.id)
+          logger.info(`[抽奖参与] 用户参与检查: userId=${userId}, 已参与=${alreadyJoined}, 当前参与人数=${participantCount}`)
 
           if (alreadyJoined) {
             logger.info(`[抽奖参与] 用户已参与，跳过`)
@@ -187,28 +173,21 @@ export function apply(ctx: Context, config: Config) {
           const username = session.username || '未知用户'
 
           // 添加参与者
-          activity.participants.push({
-            userId: userId,
-            username: username,
-            joinedAt: Date.now()
-          })
+          const added = await raffleHandler.addParticipant(activity.id, userId, username)
 
-          raffleData[activityId] = activity
-          await raffleHandler.saveRaffleData(raffleData)
+          if (added) {
+            if (config.debugMode) {
+              logger.info(`[抽奖参与] 用户 ${username} (${userId}) 成功参与抽奖活动 ${activity.id}`)
+            }
 
-          if (config.debugMode) {
-            logger.info(`[抽奖参与] 用户 ${username} (${userId}) 成功参与抽奖活动 ${activityId}`)
-          }
-
-          // 发送临时消息，5秒后撤回
-          const guildId = activity.guildId || session.guildId
-          if (guildId) {
+            // 发送临时消息，5秒后撤回
+            const newCount = await raffleHandler.getParticipantCount(activity.id)
             await sendTemporaryJoinMessage(
               session.bot,
               guildId,
               activity.name,
-              activityId,
-              activity.participants.length,
+              activity.id,
+              newCount,
               config.debugMode,
               logger,
               userId,

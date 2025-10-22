@@ -1,5 +1,4 @@
 import { Context, Logger, h } from 'koishi'
-import { RaffleActivity } from '../types'
 import { RaffleHandler } from './handler'
 import { formatTime } from '../utils'
 
@@ -15,168 +14,193 @@ export class RaffleTimerManager {
   // 执行抽奖开奖
   async performRaffleDraw(activityId: string): Promise<void> {
     try {
-      // 重新加载最新的活动数据
-      const raffleData = await this.handler.loadRaffleData()
-      const activity = raffleData[activityId]
+      this.logger.info(`开始执行活动 ${activityId} 的抽奖开奖`)
 
-      if (!activity) {
-        this.logger.error(`抽奖活动 ${activityId} 不存在`)
+      // 获取活动信息
+      const activityData = await this.handler.getActivity(activityId)
+
+      if (!activityData) {
+        this.logger.error(`活动 ${activityId} 不存在`)
         return
       }
 
-      this.logger.info(`开始执行抽奖开奖: ${activity.name} (${activityId})`)
+      const { activity, participants } = activityData
 
-      if (activity.participants.length === 0) {
+      if (activity.status !== 'active') {
+        this.logger.warn(`活动 ${activityId} 状态不是进行中: ${activity.status}`)
+        return
+      }
+
+      // 执行抽奖
+      const winners = await this.handler.drawWinners(activityId)
+
+      if (winners.length === 0 || participants.length === 0) {
         this.logger.warn(`抽奖活动 ${activityId} 没有参与者`)
-        activity.status = 'drawn'
-        activity.winners = []
-        raffleData[activityId] = activity
-        await this.handler.saveRaffleData(raffleData)
+        // 发送无人参与通知
+        await this.sendNoParticipantsNotification(activity.guildId, activity.name)
         return
       }
-
-      // 计算总奖品数量（包含None奖品，用于分配逻辑）
-      const totalPrizes = activity.prizes.reduce((sum, p) => sum + p.count, 0)
-
-      // 如果参与人数少于奖品总数，所有人都能中奖
-      const winnersCount = Math.min(totalPrizes, activity.participants.length)
-
-      // 打乱参与者顺序
-      const shuffled = [...activity.participants].sort(() => Math.random() - 0.5)
-
-      // 分配奖品
-      const winners: Array<{ userId: string; username: string; prize: string }> = []
-      let participantIndex = 0
-
-      for (const prize of activity.prizes) {
-        for (let i = 0; i < prize.count && participantIndex < winnersCount; i++) {
-          const participant = shuffled[participantIndex]
-          winners.push({
-            userId: participant.userId,
-            username: participant.username,
-            prize: `${prize.name} - ${prize.description}`
-          })
-          participantIndex++
-        }
-      }
-
-      // 为未中奖的参与者分配"未中奖"状态
-      while (participantIndex < shuffled.length) {
-        const participant = shuffled[participantIndex]
-        winners.push({
-          userId: participant.userId,
-          username: participant.username,
-          prize: 'None - none'
-        })
-        participantIndex++
-      }
-
-      // 更新活动状态
-      activity.status = 'drawn'
-      activity.winners = winners
-      raffleData[activityId] = activity
-      await this.handler.saveRaffleData(raffleData)
 
       // 发送开奖通知
-      if (activity.guildId) {
+      await this.sendWinnerNotification(activity.guildId, activity.name, winners, participants.length)
+
+      this.logger.info(`抽奖活动 ${activityId} 开奖完成，共 ${winners.length} 人中奖，${participants.length} 人参与`)
+    } catch (error) {
+      this.logger.error(`执行活动 ${activityId} 抽奖失败:`, error)
+
+      try {
+        // 即使抽奖失败，也尝试更新状态为已开奖
+        await this.handler.updateActivityStatus(activityId, 'drawn')
+      } catch (updateError) {
+        this.logger.error(`更新活动状态失败:`, updateError)
+      }
+    }
+  }
+
+  // 发送无人参与通知
+  private async sendNoParticipantsNotification(guildId: string, title: string): Promise<void> {
+    try {
+      const messageElements: any[] = [
+        `🎊 抽奖活动 "${title}" 已开奖！\n\n`,
+        `📊 参与人数: 0\n\n`,
+        `💨 本次抽奖无人参与，活动已结束！`
+      ]
+
+      // 使用 bot.sendMessage 发送消息到群聊
+      for (const bot of this.ctx.bots) {
         try {
-          // 只显示真正中奖的用户（排除None - none，不区分大小写）
-          const realWinners = winners.filter(w => w.prize.toLowerCase() !== 'none - none')
-
-          // 构建消息元素
-          const messageElements: any[] = []
-          messageElements.push(`🎊 抽奖活动 "${activity.name}" 已开奖！\n\n`)
-          messageElements.push(`📊 参与人数: ${activity.participants.length}\n`)
-
-          if (realWinners.length > 0) {
-            messageElements.push(`🎁 中奖名单:\n\n`)
-
-            // 按奖品名称分组
-            const prizeGroups = new Map<string, Array<{ userId: string; username: string }>>()
-            realWinners.forEach(winner => {
-              if (!prizeGroups.has(winner.prize)) {
-                prizeGroups.set(winner.prize, [])
-              }
-              prizeGroups.get(winner.prize).push({
-                userId: winner.userId,
-                username: winner.username
-              })
-            })
-
-            // 按奖品显示中奖者
-            prizeGroups.forEach((winners, prizeName) => {
-              messageElements.push(`【${prizeName}】\n`)
-              winners.forEach(winner => {
-                messageElements.push('- ')
-                messageElements.push(h.at(winner.userId))
-                messageElements.push('\n')
-              })
-              messageElements.push('\n')
-            })
-
-            messageElements.push(`恭喜以上中奖用户！`)
-          } else {
-            messageElements.push(`💨 本次抽奖无人中奖，谢谢参与！`)
-          }
-
-          // 使用 bot.sendMessage 发送消息到群聊
-          for (const bot of this.ctx.bots) {
-            try {
-              await bot.sendMessage(activity.guildId, messageElements)
-              break // 发送成功后跳出循环
-            } catch (err) {
-              this.logger.warn(`Bot ${bot.sid} 发送开奖通知失败: ${err}`)
-            }
-          }
-        } catch (error) {
-          this.logger.error(`发送开奖通知失败: ${error}`)
+          await bot.sendMessage(guildId, messageElements)
+          break // 发送成功后跳出循环
+        } catch (err) {
+          this.logger.warn(`Bot ${bot.sid} 发送开奖通知失败: ${err}`)
         }
       }
-
-      this.logger.info(`抽奖活动 ${activityId} 开奖完成，共 ${winners.length} 人参与`)
     } catch (error) {
-      this.logger.error(`执行抽奖开奖失败: ${error}`)
+      this.logger.error(`发送无人参与通知失败:`, error)
+    }
+  }
+
+  // 发送中奖通知
+  private async sendWinnerNotification(
+    guildId: string,
+    title: string,
+    winners: Array<{ userId: string; username: string; prizeName: string }>,
+    participantCount: number
+  ): Promise<void> {
+    try {
+      // 构建消息元素
+      const messageElements: any[] = []
+      messageElements.push(`🎊 抽奖活动 "${title}" 已开奖！\n\n`)
+      messageElements.push(`📊 参与人数: ${participantCount}\n`)
+
+      if (winners.length > 0) {
+        messageElements.push(`🎁 中奖名单:\n\n`)
+
+        // 按奖品名称分组
+        const prizeGroups = new Map<string, Array<{ userId: string; username: string }>>()
+        winners.forEach(winner => {
+          const prizeName = winner.prizeName
+          if (!prizeGroups.has(prizeName)) {
+            prizeGroups.set(prizeName, [])
+          }
+          prizeGroups.get(prizeName).push({
+            userId: winner.userId,
+            username: winner.username
+          })
+        })
+
+        // 按奖品显示中奖者
+        prizeGroups.forEach((winnerList, prizeName) => {
+          messageElements.push(`【${prizeName}】\n`)
+          winnerList.forEach(winner => {
+            messageElements.push('- ')
+            messageElements.push(h.at(winner.userId))
+            messageElements.push('\n')
+          })
+          messageElements.push('\n')
+        })
+
+        messageElements.push(`恭喜以上中奖用户！`)
+      } else {
+        messageElements.push(`💨 本次抽奖无人中奖，谢谢参与！`)
+      }
+
+      // 使用 bot.sendMessage 发送消息到群聊
+      for (const bot of this.ctx.bots) {
+        try {
+          await bot.sendMessage(guildId, messageElements)
+          break // 发送成功后跳出循环
+        } catch (err) {
+          this.logger.warn(`Bot ${bot.sid} 发送开奖通知失败: ${err}`)
+        }
+      }
+    } catch (error) {
+      this.logger.error(`发送开奖通知失败:`, error)
     }
   }
 
   // 设置抽奖定时器
-  scheduleRaffleDraw(activityId: string, activity: RaffleActivity): void {
-    const delay = activity.drawTime - Date.now()
+  scheduleRaffleDraw(guildId: string, activityId: string, drawTime: number, title: string): void {
+    const delay = drawTime - Date.now()
     if (delay <= 0) {
       this.performRaffleDraw(activityId)
       return
     }
 
+    const key = activityId
+
+    // 清除已存在的定时器
+    this.cancelTimer(guildId, activityId)
+
     const timer = setTimeout(() => {
       this.performRaffleDraw(activityId)
-      this.timers.delete(activityId)
+      this.timers.delete(key)
     }, delay)
 
-    this.timers.set(activityId, timer)
-    this.logger.info(`已设置抽奖定时器: ${activity.name}, 开奖时间: ${formatTime(activity.drawTime)}`)
+    this.timers.set(key, timer)
+    this.logger.info(`已设置抽奖定时器: ${title}, 开奖时间: ${formatTime(drawTime)}`)
   }
 
   // 初始化已有的抽奖定时器
   async initializeRaffleTimers(): Promise<void> {
     try {
-      const raffleData = await this.handler.loadRaffleData()
-      for (const [activityId, activity] of Object.entries(raffleData)) {
-        if (activity.status === 'active' && activity.drawTime > Date.now()) {
-          this.scheduleRaffleDraw(activityId, activity)
+      this.logger.info('初始化抽奖定时器...')
+
+      // 清理现有定时器
+      this.clearAllTimers()
+
+      // 获取所有进行中的活动
+      const activities = await this.ctx.database.get('raffle_activity', { status: 'active' })
+
+      for (const activity of activities) {
+        const { guildId, id, drawTime, name } = activity
+        const now = Date.now()
+        const delay = drawTime - now
+
+        if (delay > 0) {
+          // 设置定时器
+          this.scheduleRaffleDraw(guildId, id, drawTime, name)
+          this.logger.info(`为群 ${guildId} 的活动 ${id} 设置定时器，将在 ${Math.round(delay / 1000)} 秒后结束`)
+        } else {
+          // 已经超时，立即执行抽奖
+          this.logger.warn(`群 ${guildId} 的活动 ${id} 已超时，立即执行抽奖`)
+          await this.performRaffleDraw(id)
         }
       }
-      this.logger.info('抽奖定时器初始化完成')
+
+      this.logger.info(`定时器初始化完成，共设置 ${this.timers.size} 个定时器`)
     } catch (error) {
       this.logger.error(`初始化抽奖定时器失败: ${error}`)
     }
   }
 
   // 取消定时器
-  cancelTimer(activityId: string): void {
+  cancelTimer(guildId: string, activityId: string): void {
     const timer = this.timers.get(activityId)
     if (timer) {
       clearTimeout(timer)
       this.timers.delete(activityId)
+      this.logger.debug(`清除定时器: ${activityId}`)
     }
   }
 
@@ -185,5 +209,21 @@ export class RaffleTimerManager {
     this.timers.forEach(timer => clearTimeout(timer))
     this.timers.clear()
     this.logger.info('已清理所有抽奖定时器')
+  }
+
+  // 获取当前活动定时器数量
+  getTimerCount(): number {
+    return this.timers.size
+  }
+
+  // 检查指定活动是否有定时器
+  hasTimer(guildId: string, activityId: string): boolean {
+    return this.timers.has(activityId)
+  }
+
+  // 销毁定时器管理器
+  dispose(): void {
+    this.clearAllTimers()
+    this.logger.info('定时器管理器已销毁')
   }
 }

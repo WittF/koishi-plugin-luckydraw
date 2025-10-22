@@ -9,6 +9,19 @@ declare module 'koishi' {
   interface Events {
     'notice'(session: Session): void
   }
+
+  interface Tables {
+    // 抽奖系统表
+    raffle_activity: RaffleActivity
+    raffle_participant: RaffleParticipant
+    raffle_prize: RafflePrize
+    raffle_winner: RaffleWinner
+
+    // 抽签系统表
+    lottery_pool: LotteryPool
+    lottery_prize: LotteryPrize
+    user_lottery_draws: UserLotteryDraws
+  }
 }
 
 // ===== 配置接口 =====
@@ -22,47 +35,79 @@ export const schema: Schema<Config> = Schema.object({
   debugMode: Schema.boolean().description('启用调试模式').default(false),
 })
 
-// ===== 抽签相关接口 =====
+// ===== 数据库表接口定义 =====
+
+// 抽奖活动表
+export interface RaffleActivity {
+  id: string              // 活动ID (主键)
+  name: string            // 活动名称
+  guildId: string         // 群组ID
+  drawTime: number        // 开奖时间戳
+  status: 'pending' | 'active' | 'drawn' | 'cancelled'  // 活动状态
+  createdBy: string       // 创建者ID
+  createdAt: number       // 创建时间戳
+  keyword: string         // 参与口令 (可选)
+  emojiId: string         // 参与表情ID (可选)
+  announceMessageId: string  // 播报消息ID (可选)
+}
+
+// 抽奖参与者表
+export interface RaffleParticipant {
+  id: number              // 自增ID (主键)
+  activityId: string      // 活动ID (外键)
+  userId: string          // 用户ID
+  username: string        // 用户名
+  joinedAt: number        // 参与时间戳
+}
+
+// 抽奖奖品表
+export interface RafflePrize {
+  id: number              // 自增ID (主键)
+  activityId: string      // 活动ID (外键)
+  name: string            // 奖品名称
+  description: string     // 奖品描述
+  count: number           // 奖品数量
+}
+
+// 抽奖中奖者表
+export interface RaffleWinner {
+  id: number              // 自增ID (主键)
+  activityId: string      // 活动ID (外键)
+  userId: string          // 用户ID
+  username: string        // 用户名
+  prizeName: string       // 奖品名称
+  wonAt: number           // 中奖时间戳
+}
+
+// 抽签池表
+export interface LotteryPool {
+  id: number              // 自增ID (主键)
+  poolName: string        // 抽签池名称 (唯一)
+  maxDraws: number        // 最大抽取次数 (0表示无限制)
+}
+
+// 抽签奖品表
+export interface LotteryPrize {
+  id: number              // 自增ID (主键)
+  poolId: number          // 抽签池ID (外键)
+  prizeId: number         // 奖品序号
+  name: string            // 奖品名称
+  description: string     // 奖品描述
+}
+
+// 用户抽签记录表
+export interface UserLotteryDraws {
+  id: number              // 自增ID (主键)
+  userId: string          // 用户ID
+  poolName: string        // 抽签池名称
+  drawCount: number       // 已抽取次数
+}
+
+// ===== 辅助类型 =====
 export interface Prize {
   id: number
   name: string
   description: string
-}
-
-export interface LotteryPool {
-  [poolName: string]: {
-    prizes: Prize[]
-    max?: number
-  }
-}
-
-export interface UserDrawEntries {
-  [userId: string]: {
-    [poolName: string]: number
-  }
-}
-
-// ===== 抽奖相关接口 =====
-export interface RafflePrize {
-  name: string
-  description: string
-  count: number
-}
-
-export interface RaffleActivity {
-  id: string
-  name: string
-  guildId?: string
-  prizes: RafflePrize[]
-  participants: Array<{ userId: string; username: string; joinedAt: number }>
-  drawTime: number
-  status: 'pending' | 'active' | 'drawn' | 'cancelled'
-  createdBy: string
-  createdAt: number
-  keyword?: string  // 参与口令
-  emojiId?: string  // 参与表情ID
-  announceMessageId?: string  // 活动播报消息ID（用于监听表情回应）
-  winners?: Array<{ userId: string; username: string; prize: string }>
 }
 
 export interface RaffleData {

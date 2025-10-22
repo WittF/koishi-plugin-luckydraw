@@ -15,9 +15,6 @@ export function registerLotteryCommands(
       const userId = session.userId
 
       try {
-        const lotteryPool = await handler.loadLotteryPool()
-        const userEntries = await handler.loadUserDrawEntries()
-
         // 检查奖池名称是否为空
         if (!pool) {
           await sendMessage(session, '❌ 请提供有效的抽签池名称！')
@@ -25,15 +22,17 @@ export function registerLotteryCommands(
         }
 
         // 检查指定抽签池是否存在
-        if (!lotteryPool[pool] || lotteryPool[pool].prizes.length === 0) {
-          logger.warn(`❌ 抽签池 "${pool}" 不存在或已空`)
-          await sendMessage(session, `❌ 抽签池 "${pool}" 不存在或已空！`)
+        const poolData = await handler.getPool(pool)
+        if (!poolData) {
+          logger.warn(`❌ 抽签池 "${pool}" 不存在`)
+          await sendMessage(session, `❌ 抽签池 "${pool}" 不存在！`)
           return
         }
 
+        const { pool: lotteryPool, prizes } = poolData
+
         // 检查是否只剩下 None 签（视为抽签结束）
-        const allPrizes = lotteryPool[pool].prizes
-        const nonNonePrizes = allPrizes.filter(p =>
+        const nonNonePrizes = prizes.filter(p =>
           !(p.name.toLowerCase() === 'none' && p.description.toLowerCase() === 'none')
         )
 
@@ -43,31 +42,28 @@ export function registerLotteryCommands(
           return
         }
 
-        // 检查最大抽签次数（固定为1次）
-        const maxEntries = 1
-        const userPoolEntries = userEntries[userId]?.[pool] || 0
+        // 检查最大抽签次数
+        const maxEntries = lotteryPool.maxDraws
+        const userPoolEntries = await handler.getUserDrawCount(userId, pool)
         if (userPoolEntries >= maxEntries) {
           logger.warn(`❌ 用户 ${userId} 已达到抽签池 "${pool}" 的最大抽签次数`)
           await sendMessage(session, `❌ 你已在抽签池 "${pool}" 中抽过签了！`)
           return
         }
 
-        // 随机抽取奖品
-        const prizes = lotteryPool[pool].prizes
-        const prizeIndex = Math.floor(Math.random() * prizes.length)
-        const prize = prizes.splice(prizeIndex, 1)[0] // 从抽签池中删除已抽取的奖品
-
-        // 保存更新后的抽签池
-        await handler.saveLotteryPool(lotteryPool)
-
-        // 更新用户抽签次数
-        if (!userEntries[userId]) {
-          userEntries[userId] = {}
+        // 执行抽签
+        const prize = await handler.draw(userId, pool)
+        if (!prize) {
+          logger.error(`❌ 用户 ${userId} 在抽签池 "${pool}" 抽签失败`)
+          await sendMessage(session, '❌ 抽签失败，请稍后再试。')
+          return
         }
-        userEntries[userId][pool] = userPoolEntries + 1
 
-        // 保存更新后的用户抽签情况
-        await handler.saveUserDrawEntries(userEntries)
+        // 获取抽签后的剩余奖品数量
+        const updatedPoolData = await handler.getPool(pool)
+        const remainingValidPrizes = updatedPoolData.prizes.filter(p =>
+          !(p.name.toLowerCase() === 'none' && p.description.toLowerCase() === 'none')
+        ).length
 
         // 打印调试信息
         if (config.debugMode) {
@@ -77,11 +73,6 @@ export function registerLotteryCommands(
 
         // 检查是否为"未中奖"签品（名称和描述都为None或none）
         const isNoWin = (prize.name.toLowerCase() === 'none' && prize.description.toLowerCase() === 'none')
-
-        // 计算剩余有效签品数量（排除 None 签）
-        const remainingValidPrizes = prizes.filter(p =>
-          !(p.name.toLowerCase() === 'none' && p.description.toLowerCase() === 'none')
-        ).length
 
         if (isNoWin) {
           await sendMessage(
@@ -112,8 +103,6 @@ export function registerLotteryCommands(
       }
 
       try {
-        const lotteryPool = await handler.loadLotteryPool()
-
         // 解析输入数据，按行拆分（防止有多行）
         const lines = data
           .split('\n')
@@ -133,20 +122,27 @@ export function registerLotteryCommands(
             continue
           }
 
-          const [, pool, name, description] = parts
+          const [, poolName, name, description] = parts
 
-          // 如果抽签池不存在，则创建新抽签池
-          if (!lotteryPool[pool]) {
-            lotteryPool[pool] = { prizes: [] }
+          // 获取现有抽签池（如果存在）
+          const existingPoolData = await handler.getPool(poolName)
+          let prizes = []
+          let maxDraws = 1 // 默认最大抽签次数
+
+          if (existingPoolData) {
+            prizes = [...existingPoolData.prizes]
+            maxDraws = existingPoolData.pool.maxDraws
           }
 
           // 生成唯一签品 ID 并添加签品
           const prizeId = generatePrizeId()
-          lotteryPool[pool].prizes.push({ id: prizeId, name, description })
+          prizes.push({ id: prizeId, name, description })
 
-          await handler.saveLotteryPool(lotteryPool)
+          // 更新抽签池
+          await handler.createOrUpdatePool(poolName, prizes, maxDraws)
+
           resultMessage += isBatch
-            ? `✅ "${name}" (ID: ${prizeId}) 添加到 "${pool}"\n`
+            ? `✅ "${name}" (ID: ${prizeId}) 添加到 "${poolName}"\n`
             : `✅ 签品 "${name}" (ID: ${prizeId}) 添加成功！`
           successCount++
         }
@@ -179,26 +175,26 @@ export function registerLotteryCommands(
       }
 
       try {
-        const lotteryPool = await handler.loadLotteryPool()
-
         // 检查指定抽签池是否存在
-        if (!lotteryPool[pool]) {
+        const poolData = await handler.getPool(pool)
+        if (!poolData) {
           await sendMessage(session, `❌ 抽签池 "${pool}" 不存在！`)
           return
         }
 
         if (prizeId) {
           // 查找并删除指定签品
-          const prizeIndex = lotteryPool[pool].prizes.findIndex(prize => prize.id === prizeId)
+          const prizeIndex = poolData.prizes.findIndex(prize => prize.id === prizeId)
           if (prizeIndex === -1) {
             await sendMessage(session, `❌ 抽签池 "${pool}" 中没有 ID 为 ${prizeId} 的签品！`)
             return
           }
 
-          const removedPrize = lotteryPool[pool].prizes.splice(prizeIndex, 1)[0]
+          const removedPrize = poolData.prizes[prizeIndex]
+          const updatedPrizes = poolData.prizes.filter(prize => prize.id !== prizeId)
 
-          // 保存更新后的抽签池
-          await handler.saveLotteryPool(lotteryPool)
+          // 更新抽签池
+          await handler.createOrUpdatePool(pool, updatedPrizes, poolData.pool.maxDraws)
 
           // 打印调试信息
           if (config.debugMode) {
@@ -208,10 +204,7 @@ export function registerLotteryCommands(
           await sendMessage(session, `✅ 抽签池 "${pool}" 中的签品 "${removedPrize.name}" (ID: ${prizeId}) 已被删除！`)
         } else {
           // 删除整个抽签池
-          delete lotteryPool[pool]
-
-          // 保存更新后的抽签池
-          await handler.saveLotteryPool(lotteryPool)
+          await handler.deletePool(pool)
 
           // 打印调试信息
           if (config.debugMode) {
@@ -238,17 +231,16 @@ export function registerLotteryCommands(
       }
 
       try {
-        const lotteryPool = await handler.loadLotteryPool()
-
         if (pool) {
           // 显示指定抽签池的签品
-          if (!lotteryPool[pool] || lotteryPool[pool].prizes.length === 0) {
+          const poolData = await handler.getPool(pool)
+          if (!poolData || poolData.prizes.length === 0) {
             await sendMessage(session, `❌ 抽签池 "${pool}" 不存在或已空！`)
             return
           }
 
           let result = `▶️ 抽签池 "${pool}" 的所有签品：\n`
-          lotteryPool[pool].prizes.forEach(prize => {
+          poolData.prizes.forEach(prize => {
             result += `  • ID: ${prize.id}. "${prize.name}" - ${prize.description}\n`
           })
 
@@ -257,17 +249,17 @@ export function registerLotteryCommands(
         }
 
         // 显示所有抽签池的签品
-        let result = '▶️ 当前所有抽签池及签品：\n'
-        const pools = Object.entries(lotteryPool)
-        if (pools.length === 0) {
+        const allPools = await handler.getAllPools()
+        if (allPools.length === 0) {
           await sendMessage(session, '❌ 没有任何抽签池信息。')
           return
         }
 
-        for (const [poolName, poolData] of pools) {
-          result += `【${poolName}】（剩余 ${poolData.prizes.length} 个）：\n`
+        let result = '▶️ 当前所有抽签池及签品：\n'
+        for (const poolData of allPools) {
+          result += `【${poolData.pool.poolName}】（剩余 ${poolData.prizes.length} 个）：\n`
           poolData.prizes.forEach(prize => {
-            result += `  • ID: ${prize.id}. "${prize.name}" - ${prize.description}\n`
+            result += `  • ID: ${prize.prizeId}. "${prize.name}" - ${prize.description}\n`
           })
         }
 
