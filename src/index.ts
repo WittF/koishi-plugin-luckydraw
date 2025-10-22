@@ -8,6 +8,7 @@ import { registerRaffleCommands } from './raffle/commands'
 import { sendTemporaryJoinMessage } from './utils'
 
 export const name = 'lucky-draw'
+export const inject = ['database']
 export { Config, schema } from './types'
 
 export function apply(ctx: Context, config: Config) {
