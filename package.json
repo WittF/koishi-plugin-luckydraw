@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-luckydraw",
   "description": "A Koishi plugin for managing lucky draw and lottery activities with interactive creation and scheduled drawing.",
-  "version": "2.1.4",
+  "version": "2.2.0",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
